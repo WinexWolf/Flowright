@@ -1,1 +1,10 @@
-{"name":"@flowright/explorer","version":"0.1.0","type":"module","main":"src/index.ts"}
+{
+  "name": "@flowright/explorer",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./crawler": "./src/crawler.ts"
+  }
+}

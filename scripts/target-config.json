@@ -1,0 +1,1 @@
+{ "name": "shop", "startPath": "/", "sandbox": true, "blockedActionPatterns": ["log ?out|sign ?out"], "formValues": { "email": "demo@example.com", "password": "password123" } }

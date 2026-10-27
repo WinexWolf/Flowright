@@ -1,0 +1,12 @@
+import { startApp } from '../packages/benchmark/src/servers.ts';
+import { TARGETS } from '../packages/benchmark/src/targets.ts';
+import { crawl } from '../packages/explorer/src/crawler.ts';
+const app = process.argv[2] ?? 'shop'; const bugs = (process.argv[3] ?? '').split(',').filter(Boolean);
+const r = await startApp(app, bugs);
+const res = await crawl(r.baseUrl, TARGETS[app], { maxSteps: 400, maxTimeMs: 400000 });
+await r.stop();
+for (const s of res.graph.states) console.log(s.id.padEnd(4), 'd' + s.depth, s.urlTemplate.padEnd(26), (s.evidence.headings[0] ?? '').padEnd(24), s.evidence.dialogs.length ? '[dialog]' : '', s.evidence.alerts.length ? '[alert: ' + s.evidence.alerts[0].slice(0, 30) + ']' : '');
+const flagged = res.graph.edges.filter(e => e.obs.consoleErrors.length || e.obs.pageErrors.length || e.obs.failedRequests.length || e.obs.badResponses.length || e.obs.noEffect || e.obs.actionError);
+console.log('\nedges with raw observations:', flagged.length);
+for (const e of flagged) console.log(' ', e.from, '->', e.to, e.label, JSON.stringify({ c: e.obs.consoleErrors.length, p: e.obs.pageErrors.length, bad: e.obs.badResponses, noEffect: e.obs.noEffect, err: e.obs.actionError }));
+console.log('\ncycles:', JSON.stringify(res.graph.cycles));

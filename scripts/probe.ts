@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import { snapshot } from '../packages/explorer/src/snapshot.ts';
+const b = await chromium.launch(); const ctx = await b.newContext(); const page = await ctx.newPage();
+const show = async (label: string) => { const s = await snapshot(page);
+  console.log('\n==', label, '\nroute:', s.evidence.route, '| headings:', s.evidence.headings, '| dialogs:', s.evidence.dialogs.length, '| alerts:', s.evidence.alerts, '| tabs:', s.evidence.selectedTabs);
+  console.log('interactive:', s.interactive.map(i => `${i.role}:${i.name}`).slice(0, 14).join(' | '));
+  console.log('forms:', JSON.stringify(s.forms.map(f => ({ key: f.key, fields: f.fields.map(x => x.name+':'+x.type), submit: f.submit?.name }))));
+  console.log('tree:', JSON.stringify(s.tree).slice(0, 220)); };
+await page.goto(process.argv[2] + '/checkout'); await show('shop checkout');
+await page.goto(process.argv[3] + '/#/tasks'); await page.waitForTimeout(400); await show('tasks list');
+await page.getByRole('button', { name: 'New task' }).click(); await page.waitForTimeout(200); await show('tasks + new dialog');
+await b.close();

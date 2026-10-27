@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+import { startApp } from '../packages/benchmark/src/servers.ts';
+import { snapshot, trackInflight } from '../packages/explorer/src/snapshot.ts';
+import { fingerprint, UrlTemplater } from '../packages/core/src/index.ts';
+const app = await startApp('tasks'); const b = await chromium.launch(); const page = await (await b.newContext()).newPage();
+const tr = trackInflight(page); const T = new UrlTemplater();
+await page.goto(app.baseUrl + '/#/tasks'); await tr.settle();
+const a = await snapshot(page); const fa = fingerprint(T.template(page.url()), a.tree, a.tabs);
+await page.getByRole('button', { name: 'New task', exact: true }).click(); await tr.settle();
+const c = await snapshot(page); const fc = fingerprint(T.template(page.url()), c.tree, c.tabs);
+console.log('url', page.url(), 'tpl', T.template(page.url()));
+console.log('dialogs evidence before/after:', a.evidence.dialogs.length, c.evidence.dialogs.length);
+console.log('fine before/after', fa.fine, fc.fine, '| overlay after:', fc.overlay);
+console.log('tree-after has dialog node?', JSON.stringify(c.tree).includes('"dialog"'));
+console.log(JSON.stringify(c.tree).slice(-300));
+await b.close(); await app.stop();
