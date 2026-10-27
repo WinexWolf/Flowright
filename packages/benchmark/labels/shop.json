@@ -1,0 +1,33 @@
+{
+  "app": "shop",
+  "split": "dev",
+  "note": "States are defined in user-visible terms (route + heading/text/alert). They are matched against crawl evidence WITHOUT using the crawler's fingerprint.",
+  "states": [
+    { "id": "home", "route": "^/$", "heading": "Welcome to Shopfront" },
+    { "id": "products", "route": "^/products$", "heading": "All products" },
+    { "id": "category", "route": "^/products\\?category=", "heading": "Category" },
+    { "id": "product_detail", "route": "^/products/\\d+$" },
+    { "id": "cart_empty", "route": "^/cart$", "text": "Your cart is empty" },
+    { "id": "cart_items", "route": "^/cart$", "text": "Subtotal" },
+    { "id": "checkout", "route": "^/checkout$", "heading": "Checkout", "noAlert": true },
+    { "id": "checkout_error", "route": "^/checkout$", "alert": "Please enter" },
+    { "id": "order_confirmed", "route": "^/order/\\d+$", "heading": "Order confirmed" },
+    { "id": "login", "route": "^/login$", "heading": "Log in", "noAlert": true },
+    { "id": "login_error", "route": "^/login$", "alert": "Invalid" },
+    { "id": "account", "route": "^/account$", "heading": "My account" },
+    { "id": "about", "route": "^/about$", "heading": "About us" },
+    { "id": "help", "route": "^/help$", "heading": "Help center" },
+    { "id": "contact", "route": "^/contact$", "heading": "Contact us" },
+    { "id": "contact_sent", "route": "^/contact/sent$", "heading": "Message sent" }
+  ],
+  "flows": [
+    { "id": "browse_to_product", "states": ["home", "products", "product_detail"] },
+    { "id": "category_filter", "states": ["products", "category"] },
+    { "id": "add_to_cart", "states": ["product_detail", "cart_items"] },
+    { "id": "checkout_happy", "states": ["cart_items", "checkout", "order_confirmed"] },
+    { "id": "checkout_validation", "states": ["checkout", "checkout_error"] },
+    { "id": "login_happy", "states": ["login", "account"] },
+    { "id": "login_invalid", "states": ["login", "login_error"] },
+    { "id": "contact_form", "states": ["contact", "contact_sent"] }
+  ]
+}

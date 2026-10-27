@@ -1,0 +1,28 @@
+{
+  "app": "tasks",
+  "split": "dev",
+  "states": [
+    { "id": "dashboard", "route": "^/(#/)?$", "heading": "Dashboard" },
+    { "id": "tasks_all", "route": "^/#/tasks$", "heading": "Tasks", "selectedTab": "All", "noDialog": true },
+    { "id": "tasks_open", "route": "^/#/tasks$", "heading": "Tasks", "selectedTab": "Open", "noDialog": true },
+    { "id": "tasks_done", "route": "^/#/tasks$", "heading": "Tasks", "selectedTab": "Done", "noDialog": true },
+    { "id": "new_task_dialog", "route": "^/#/tasks$", "dialog": "New task", "noAlert": true },
+    { "id": "new_task_error", "route": "^/#/tasks$", "dialog": "New task", "alert": "Title is required" },
+    { "id": "delete_confirm", "route": "^/#/tasks$", "dialog": "Delete this task?" },
+    { "id": "task_detail", "route": "^/#/tasks/\\d+$", "noDialog": true },
+    { "id": "edit_dialog", "route": "^/#/tasks/\\d+$", "dialog": "Edit task" },
+    { "id": "projects", "route": "^/#/projects$", "heading": "Projects" },
+    { "id": "settings_profile", "route": "^/#/settings$", "heading": "Profile" },
+    { "id": "settings_notifications", "route": "^/#/settings$", "heading": "Notification preferences" },
+    { "id": "reports", "route": "^/#/reports$", "heading": "Reports" }
+  ],
+  "flows": [
+    { "id": "open_task_detail", "states": ["dashboard", "tasks_all", "task_detail"] },
+    { "id": "filter_open", "states": ["tasks_all", "tasks_open"] },
+    { "id": "create_task_validation", "states": ["tasks_all", "new_task_dialog", "new_task_error"] },
+    { "id": "delete_task_confirm", "states": ["tasks_all", "delete_confirm"] },
+    { "id": "edit_task", "states": ["task_detail", "edit_dialog"] },
+    { "id": "view_projects", "states": ["dashboard", "projects"] },
+    { "id": "settings_notifications_flow", "states": ["settings_profile", "settings_notifications"] }
+  ]
+}

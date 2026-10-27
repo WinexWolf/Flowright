@@ -1,0 +1,121 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>TaskBoard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui;margin:0}header{background:#1f2937;padding:12px 24px}header a{color:#fff;margin-right:16px;text-decoration:none}
+main{padding:24px;max-width:960px}.cards{display:flex;gap:16px}.card{border:1px solid #ddd;padding:12px;min-width:120px}
+[role=tablist]{display:flex;gap:8px;margin:12px 0}[role=tab]{padding:6px 12px;border:1px solid #ccc;background:#fff;cursor:pointer}[role=tab][aria-selected=true]{background:#e0e7ff}
+.row{display:flex;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid #eee}.err{color:#b00020}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+dialog-box{background:#fff;padding:20px;min-width:320px}label{display:block;margin:8px 0}
+</style></head><body>
+<header><nav aria-label="Primary" id="nav"></nav></header>
+<main id="main"></main><div id="overlay"></div><div id="toast" role="status" aria-live="polite"></div>
+<script>
+/*__BUGS__*/
+const bug = (id) => (window.__BUGS || []).includes(id);
+const $ = (s) => document.querySelector(s);
+const h = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (!r.ok) { const e = new Error('API ' + r.status); e.status = r.status; e.body = await r.json().catch(() => ({})); throw e; }
+  return r.json();
+};
+const NAV = [['#/', 'Dashboard'], ['#/tasks', 'Tasks'], ['#/projects', 'Projects'], ['#/settings', 'Settings'], [bug('tasks-broken-link') ? '#/report' : '#/reports', 'Reports']];
+$('#nav').innerHTML = NAV.map(([href, label]) => `<a href="${href}">${label}</a>`).join('');
+const closeDialog = () => { $('#overlay').innerHTML = ''; };
+const toast = (m) => { $('#toast').textContent = m; };
+let taskFilter = 'all';
+
+async function dashboard() {
+  const tasks = await api('/api/tasks');
+  const open = tasks.filter(t => !t.done).length;
+  const wide = bug('tasks-layout-overflow') ? '<table style="width:1600px"><tr><td>Quarterly metrics table</td></tr></table>' : '';
+  $('#main').innerHTML = `<h1>Dashboard</h1><div class="cards"><div class="card">Open tasks<br><strong>${open}</strong></div>
+<div class="card">Done<br><strong>${tasks.length - open}</strong></div></div>${wide}
+<h2>Recent tasks</h2><ul>${tasks.slice(-3).map(t => `<li><a href="#/tasks/${t.id}">${h(t.title)}</a></li>`).join('')}</ul>`;
+}
+async function tasksPage() {
+  const tasks = await api('/api/tasks');
+  const shown = tasks.filter(t => taskFilter === 'all' || (taskFilter === 'open' ? !t.done : t.done));
+  $('#main').innerHTML = `<h1>Tasks</h1><button id="new">New task</button>
+<div role="tablist" aria-label="Filter tasks">${['all', 'open', 'done'].map(f => `<button role="tab" aria-selected="${taskFilter === f}" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>
+<ul>${shown.map(t => `<li class="row"><a href="#/tasks/${t.id}">${h(t.title)}</a><span>${t.done ? 'Done' : 'Open'}</span><button data-del="${t.id}">Delete</button></li>`).join('') || '<li>No tasks match this filter.</li>'}</ul>`;
+  $('#new').onclick = () => newTaskDialog();
+  document.querySelectorAll('[role=tab]').forEach(b => b.onclick = () => { taskFilter = b.dataset.f; tasksPage(); });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirmDelete(Number(b.dataset.del)));
+}
+function newTaskDialog() {
+  $('#overlay').innerHTML = `<div class="overlay"><div role="dialog" aria-modal="true" aria-labelledby="dt" class="dialog-box" style="background:#fff;padding:20px;min-width:320px">
+<h2 id="dt">New task</h2><div id="formerr"></div>
+<label>Title <input id="title" type="text"></label>
+<label>Priority <select id="prio"><option>low</option><option selected>medium</option><option>high</option></select></label>
+<button id="create">Create task</button> <button id="cancel">Cancel</button></div></div>`;
+  $('#cancel').onclick = closeDialog;
+  $('#create').onclick = async () => {
+    try { await api('/api/tasks', { method: 'POST', body: { title: $('#title').value, priority: $('#prio').value } }); closeDialog(); tasksPage(); }
+    catch (e) { $('#formerr').innerHTML = `<div role="alert" class="err">${h(e.body?.error || 'Could not create task')}</div>`; }
+  };
+}
+function confirmDelete(id) {
+  $('#overlay').innerHTML = `<div class="overlay"><div role="dialog" aria-modal="true" aria-labelledby="dt" style="background:#fff;padding:20px;min-width:320px">
+<h2 id="dt">Delete this task?</h2><p>This cannot be undone.</p><button id="yes">Confirm delete</button> <button id="no">Keep task</button></div></div>`;
+  $('#no').onclick = closeDialog;
+  $('#yes').onclick = async () => { await api('/api/tasks/' + id, { method: 'DELETE' }); closeDialog(); tasksPage(); };
+}
+async function taskDetail(id) {
+  let t;
+  try { t = await api('/api/tasks/' + id); } catch { $('#main').innerHTML = '<h1>Task not found</h1><a href="#/tasks">Back to tasks</a>'; return; }
+  $('#main').innerHTML = `<h1>${h(t.title)}</h1><p>${h(t.description)}</p><p>Status: <span id="status">${t.done ? 'Done' : 'Open'}</span> · Priority: ${h(t.priority)}</p>
+<button id="toggle">${t.done ? 'Mark as open' : 'Mark as done'}</button> <button id="edit">Edit</button> <p><a href="#/tasks">Back to tasks</a></p>`;
+  $('#toggle').onclick = async () => {
+    if (bug('tasks-dead-mark-done')) { return window.markDoneHandler.run(t.id); }   // ReferenceError -> dead click
+    await api('/api/tasks/' + id, { method: 'PATCH', body: { done: !t.done } }); taskDetail(id);
+  };
+  $('#edit').onclick = () => {
+    $('#overlay').innerHTML = `<div class="overlay"><div role="dialog" aria-modal="true" aria-labelledby="dt" style="background:#fff;padding:20px;min-width:320px">
+<h2 id="dt">Edit task</h2><label>Title <input id="etitle" type="text" value="${h(t.title)}"></label><button id="save">Save changes</button> <button id="cancel">Cancel</button></div></div>`;
+    $('#cancel').onclick = closeDialog;
+    $('#save').onclick = async () => { await api('/api/tasks/' + id, { method: 'PATCH', body: { title: $('#etitle').value } }); closeDialog(); taskDetail(id); };
+  };
+}
+async function projects() {
+  $('#main').innerHTML = '<h1>Projects</h1><p>Loading…</p>';
+  try {
+    const list = await api('/api/projects');
+    $('#main').innerHTML = `<h1>Projects</h1><ul>${list.map(p => `<li>${h(p.name)} - ${p.tasks} tasks</li>`).join('')}</ul>`;
+  } catch (e) { console.error('projects failed', e.message); $('#main').innerHTML = '<h1>Projects</h1><p class="err">Something went wrong loading projects.</p>'; }
+}
+let settingsTab = 'profile';
+async function settings() {
+  const prof = await api('/api/profile'); const notif = await api('/api/notifications');
+  $('#main').innerHTML = `<h1>Settings</h1><div role="tablist" aria-label="Settings sections">
+<button role="tab" aria-selected="${settingsTab === 'profile'}" data-t="profile">Profile</button>
+<button role="tab" aria-selected="${settingsTab === 'notifications'}" data-t="notifications">Notifications</button></div><section id="panel"></section>`;
+  document.querySelectorAll('[role=tab]').forEach(b => b.onclick = () => { settingsTab = b.dataset.t; settings(); });
+  if (settingsTab === 'profile') {
+    $('#panel').innerHTML = `<h2>Profile</h2><label>Name <input id="pname" type="text" value="${h(prof.name)}"></label>
+<label>Email <input id="pemail" type="email" value="${h(prof.email)}"></label><button id="saveprof">Save profile</button>`;
+    $('#saveprof').onclick = async () => { await api('/api/profile', { method: 'POST', body: { name: $('#pname').value, email: $('#pemail').value } }); toast('Profile saved'); };
+  } else {
+    if (bug('tasks-console-error')) console.error('Notification preferences failed to hydrate');
+    $('#panel').innerHTML = `<h2>Notification preferences</h2><label><input id="nemail" type="checkbox" ${notif.email ? 'checked' : ''}> Email alerts</label>
+<label><input id="npush" type="checkbox" ${notif.push ? 'checked' : ''}> Push alerts</label><button id="savenotif">Save preferences</button>`;
+    $('#savenotif').onclick = async () => { await api('/api/notifications', { method: 'POST', body: { email: $('#nemail').checked, push: $('#npush').checked } }); toast('Preferences saved'); };
+  }
+}
+function reports() { $('#main').innerHTML = '<h1>Reports</h1><p>Weekly summary report is generated every Monday.</p><a href="#/">Back to dashboard</a>'; }
+
+async function route() {
+  closeDialog(); toast('');
+  const hash = location.hash || '#/';
+  const m = hash.match(/^#\/tasks\/(\d+)$/);
+  if (hash === '#/') return dashboard();
+  if (hash === '#/tasks') return tasksPage();
+  if (m) return taskDetail(m[1]);
+  if (hash === '#/projects') return projects();
+  if (hash === '#/settings') return settings();
+  if (hash === '#/reports') return reports();
+  $('#main').innerHTML = '';            // unknown route renders a blank screen
+}
+window.addEventListener('hashchange', route); route();
+</script></body></html>

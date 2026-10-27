@@ -1,0 +1,23 @@
+{
+  "note": "Injected bugs, toggled via FLOWRIGHT_BUGS. 'detect' says what kind of evidence should reveal it: tier1 = objective browser signal (console/network/overflow/dead click/404), form-probe = needs a deliberate empty/invalid form submit. 'split' dev|heldout.",
+  "bugs": [
+    { "id": "shop-broken-link", "app": "shop", "kind": "broken-link", "detect": "tier1", "split": "dev", "where": "footer Help link -> 404" },
+    { "id": "shop-console-error", "app": "shop", "kind": "console-error", "detect": "tier1", "split": "dev", "where": "/about" },
+    { "id": "shop-failing-api", "app": "shop", "kind": "failed-request", "detect": "tier1", "split": "heldout", "where": "/products/:id stock call 500" },
+    { "id": "shop-dead-add-to-cart", "app": "shop", "kind": "dead-click", "detect": "tier1", "split": "dev", "where": "/products/:id Add to cart" },
+    { "id": "shop-layout-overflow", "app": "shop", "kind": "overflow", "detect": "tier1", "split": "dev", "where": "/products" },
+    { "id": "shop-missing-validation", "app": "shop", "kind": "missing-validation", "detect": "form-probe", "split": "dev", "where": "/checkout accepts invalid email" },
+    { "id": "tasks-broken-link", "app": "tasks", "kind": "empty-route", "detect": "tier1", "split": "dev", "where": "nav Reports -> blank screen" },
+    { "id": "tasks-console-error", "app": "tasks", "kind": "console-error", "detect": "tier1", "split": "heldout", "where": "#/settings Notifications tab" },
+    { "id": "tasks-failing-api", "app": "tasks", "kind": "failed-request", "detect": "tier1", "split": "dev", "where": "#/projects" },
+    { "id": "tasks-dead-mark-done", "app": "tasks", "kind": "dead-click", "detect": "tier1", "split": "dev", "where": "task detail Mark as done" },
+    { "id": "tasks-layout-overflow", "app": "tasks", "kind": "overflow", "detect": "tier1", "split": "heldout", "where": "dashboard" },
+    { "id": "tasks-missing-validation", "app": "tasks", "kind": "missing-validation", "detect": "form-probe", "split": "dev", "where": "New task accepts empty title" },
+    { "id": "lib-broken-link", "app": "library", "kind": "broken-link", "detect": "tier1", "split": "heldout", "where": "nav Events -> 404" },
+    { "id": "lib-console-error", "app": "library", "kind": "console-error", "detect": "tier1", "split": "heldout", "where": "/events" },
+    { "id": "lib-failing-api", "app": "library", "kind": "failed-request", "detect": "tier1", "split": "heldout", "where": "/books availability 503" },
+    { "id": "lib-dead-reserve", "app": "library", "kind": "dead-click", "detect": "tier1", "split": "heldout", "where": "/books/:slug Reserve" },
+    { "id": "lib-layout-overflow", "app": "library", "kind": "overflow", "detect": "tier1", "split": "heldout", "where": "/events" },
+    { "id": "lib-missing-validation", "app": "library", "kind": "missing-validation", "detect": "form-probe", "split": "heldout", "where": "/join accepts short password" }
+  ]
+}

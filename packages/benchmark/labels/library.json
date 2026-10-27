@@ -1,0 +1,29 @@
+{
+  "app": "library",
+  "split": "heldout",
+  "note": "HELD-OUT. Do not run during development. Run once at the end of a milestone; do not tune afterwards.",
+  "states": [
+    { "id": "home", "route": "^/$", "heading": "Welcome to Riverside Library" },
+    { "id": "books_all", "route": "^/books$", "heading": "All books" },
+    { "id": "books_genre", "route": "^/books\\?genre=[a-z]+$" },
+    { "id": "books_page2", "route": "^/books\\?(genre=[a-z]+&)?page=2$" },
+    { "id": "book_detail", "route": "^/books/[a-z0-9-]+$" },
+    { "id": "reservations_empty", "route": "^/reservations$", "text": "no reservations" },
+    { "id": "reservations_items", "route": "^/reservations$", "notText": "no reservations" },
+    { "id": "search_empty", "route": "^/search\\?q=", "text": "No books found" },
+    { "id": "search_results", "route": "^/search\\?q=", "heading": "Search results", "notText": "No books found" },
+    { "id": "events", "route": "^/events$", "heading": "Events" },
+    { "id": "join", "route": "^/join$", "heading": "Become a member", "noAlert": true },
+    { "id": "join_error", "route": "^/join$", "alert": "required" },
+    { "id": "welcome", "route": "^/welcome$", "heading": "Welcome, new member" }
+  ],
+  "flows": [
+    { "id": "browse_book", "states": ["home", "books_all", "book_detail"] },
+    { "id": "genre_filter", "states": ["books_all", "books_genre"] },
+    { "id": "paginate", "states": ["books_all", "books_page2"] },
+    { "id": "reserve", "states": ["book_detail", "reservations_items"] },
+    { "id": "search_hit", "states": ["home", "search_results"] },
+    { "id": "join_validation", "states": ["join", "join_error"] },
+    { "id": "join_ok", "states": ["join", "welcome"] }
+  ]
+}
