@@ -69,7 +69,7 @@
         "kinds": [
           "overflow"
         ],
-        "route": "^/products$"
+        "route": "^/products"
       }
     },
     {
@@ -123,7 +123,8 @@
       "where": "#/projects",
       "match": {
         "kinds": [
-          "failed-request"
+          "failed-request",
+          "console-error"
         ],
         "route": "^/#/projects$"
       }
@@ -257,5 +258,6 @@
       }
     }
   ],
-  "note2": "match = which oracle finding kinds on which route count as detecting the bug (a bug may surface as several symptoms, e.g. a dead click that also throws). Written before the oracle existed. A confirmed finding that matches no ENABLED bug is a false positive."
+  "note2": "match = which oracle finding kinds on which route count as detecting the bug (a bug may surface as several symptoms, e.g. a dead click that also throws). Written before the oracle existed. A confirmed finding that matches no ENABLED bug is a false positive.",
+  "note3": "ERRATA (post dev-run, see errata.json): match scope widened for shop-layout-overflow (also visible on /products?category=) and tasks-failing-api (the app also logs the failure via console.error). Original strict results are kept in docs/decisions.md."
 }

@@ -41,6 +41,7 @@ export function trackInflight(page: Page) {
   page.on('requestfailed', () => { inflight = Math.max(0, inflight - 1); bump(); });
   return {
     get inflight() { return inflight; },
+    async lastMutation(): Promise<number> { try { return (await page.evaluate(`window.__frLastMut || 0`)) as number; } catch { return 0; } },
     async settle(quietMs = 150, maxMs = 4000) {
       const start = Date.now(); bump();
       await page.waitForLoadState('domcontentloaded').catch(() => {});

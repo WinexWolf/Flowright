@@ -1,0 +1,15 @@
+{
+  "note": "Real defects that exist in the CLEAN apps (not injected). Findings matching these are reported separately: neither false positives nor recall.",
+  "defects": [
+    {
+      "id": "tasks-edit-title-unvalidated",
+      "app": "tasks",
+      "kinds": [
+        "missing-validation"
+      ],
+      "route": "^/#/tasks/\\d+$",
+      "where": "task detail > Edit dialog accepts a blank title (server PATCH has no validation)",
+      "foundBy": "oracle, dev run 1"
+    }
+  ]
+}

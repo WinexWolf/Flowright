@@ -1,27 +1,14 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import {
   fingerprint, fineFrom, UrlTemplater,
-  type Budget, type Evidence, type ExplorationResult, type FieldSpec, type PageSnapshot, type TargetConfig,
+  type Action, type Budget, type CrawlGraph, type Edge, type ExplorationResult, type Obs, type PageSnapshot, type StateNode, type TargetConfig, type Variant,
 } from '@flowright/core';
-import { snapshot, trackInflight } from './snapshot.js';
+import { snapshot, openSession, freshObs, perform as performAction, type Session } from '@flowright/driver';
 import { isBlocked } from './blocklist.js';
+export { valueFor } from '@flowright/driver';
+export type { Action, CrawlGraph, Edge, Obs, StateNode, Variant } from '@flowright/core';
 
 // ---------------------------------------------------------------- types
-export type Variant = 'valid' | 'empty' | 'invalid';
-export type Action =
-  | { kind: 'click'; role: string; name: string; nth: number; css: string; label: string }
-  | { kind: 'form'; variant: Variant; fields: FieldSpec[]; submit: { css: string; name: string; role: string; nth: number } | null; label: string };
-
-export interface Obs {
-  consoleErrors: string[]; pageErrors: string[]; failedRequests: string[]; badResponses: string[];
-  noEffect: boolean; actionError?: string;
-}
-export interface StateNode {
-  id: string; fine: string; coarse: string; treeHash: string; overlay: string;
-  url: string; urlTemplate: string; evidence: Evidence; depth: number; path: Action[];
-}
-export interface Edge { from: string; to: string; label: string; obs: Obs }
-export interface CrawlGraph { states: StateNode[]; edges: Edge[]; cycles: string[][] }
 export interface CrawlOptions {
   maxPerElementKey?: number;      // how many times the same (role,name,href-template) action may be tried across states
   dryRun?: boolean;               // load the start page, list what would be done, do nothing else
@@ -30,37 +17,7 @@ export interface CrawlOptions {
 export type CrawlResult = ExplorationResult & { graph: CrawlGraph };
 
 interface Task { node: StateNode; action: Action; key: string; prio: number }
-interface Session { ctx: BrowserContext; page: Page; tr: ReturnType<typeof trackInflight>; obs: Obs; requests: number }
 
-const freshObs = (): Obs => ({ consoleErrors: [], pageErrors: [], failedRequests: [], badResponses: [], noEffect: false });
-
-// ---------------------------------------------------------------- form value heuristics (deterministic; an LLM replaces this in M3)
-export function valueFor(f: FieldSpec, variant: Variant, cfg: TargetConfig): string | null {
-  if (variant === 'empty') return null;
-  const t = f.type;
-  if (variant === 'invalid') {
-    if (t === 'email') return 'not-an-email';
-    if (t === 'number') return '-1';
-    return 'x';
-  }
-  const hay = `${f.name} ${f.label}`.toLowerCase();
-  for (const [k, v] of Object.entries(cfg.formValues ?? {})) {
-    if (f.name.toLowerCase() === k.toLowerCase() || t === k || hay.includes(k.toLowerCase())) return v;
-  }
-  if (t === 'email' || /e-?mail/.test(hay)) return 'test@example.com';
-  if (t === 'password') return 'Password123!';
-  if (t === 'tel' || /phone/.test(hay)) return '5551234567';
-  if (t === 'number') return '1';
-  if (t === 'date') return '2025-01-15';
-  if (t === 'url') return 'https://example.com';
-  if (/zip|postal/.test(hay)) return '94105';
-  if (/card/.test(hay)) return '4242424242424242';
-  if (/address|street/.test(hay)) return '1 Test Street';
-  if (/name/.test(hay)) return 'Test User';
-  if (/title|subject/.test(hay)) return 'Test item';
-  if (/search|query|^q$/.test(hay)) return 'test';
-  return 'test';
-}
 
 // ---------------------------------------------------------------- crawler
 export async function crawl(baseUrl: string, cfg: TargetConfig, budget: Budget, opts: CrawlOptions = {}): Promise<CrawlResult> {
@@ -68,7 +25,7 @@ export async function crawl(baseUrl: string, cfg: TargetConfig, budget: Budget, 
   const maxPerKey = opts.maxPerElementKey ?? 2;
   const t0 = Date.now();
   const origin = new URL(baseUrl).origin;
-  const allowedHosts = new Set([new URL(baseUrl).host, ...(cfg.allowedHosts ?? [])]);
+  const allowedHosts = new Set([new URL(baseUrl).host, ...(cfg.allowedHosts ?? [])]);   // used to skip off-site links; containment itself is in openSession
   const templater = new UrlTemplater(cfg);
   const browser: Browser = await chromium.launch();
 
@@ -79,21 +36,8 @@ export async function crawl(baseUrl: string, cfg: TargetConfig, budget: Budget, 
   const stats = { tasksCreated: 0, executed: 0, skippedBlocked: 0, skippedExternal: 0, skippedKeyCap: 0, actionErrors: 0, replayDrift: 0, budgetExhausted: '' as string, noEffectActions: 0 };
   let seq = 0;
 
-  // ----- sessions: a fresh browser context per branch, so server/session state never bleeds between branches
-  async function newSession(): Promise<Session> {
-    const ctx = await browser.newContext({ viewport: cfg.viewport ?? { width: 1280, height: 720 }, storageState: cfg.storageState });
-    await ctx.route(u => !allowedHosts.has(new URL(u.toString()).host), r => r.abort());   // containment: never leave the target
-    const page = await ctx.newPage();
-    page.on('dialog', d => d.accept().catch(() => {}));
-    const s: Session = { ctx, page, tr: trackInflight(page), obs: freshObs(), requests: 0 };
-    page.on('request', () => { s.requests++; });
-    page.on('console', m => { if (m.type() === 'error') s.obs.consoleErrors.push(m.text().slice(0, 300)); });
-    page.on('pageerror', e => s.obs.pageErrors.push(String(e.message).slice(0, 300)));
-    page.on('requestfailed', r => { if (allowedHosts.has(new URL(r.url()).host)) s.obs.failedRequests.push(`${r.method()} ${r.url()} ${r.failure()?.errorText ?? ''}`); });
-    page.on('response', r => { const t = r.request().resourceType(); if (r.status() >= 400 && ['document', 'xhr', 'fetch'].includes(t)) s.obs.badResponses.push(`${r.status()} ${r.url()}`); });
-    page.on('popup', p => { p.close().catch(() => {}); });
-    return s;
-  }
+  // ----- sessions: a fresh browser context per branch (shared with the replayer via the driver package)
+  const newSession = () => openSession(browser, baseUrl, cfg);
 
   // ----- registering states + enumerating the actions available in them
   function register(snap: PageSnapshot, url: string, path: Action[], depth: number): { node: StateNode; isNew: boolean } {
@@ -129,33 +73,8 @@ export async function crawl(baseUrl: string, cfg: TargetConfig, budget: Budget, 
     }
   }
 
-  // ----- performing actions (used for both replay and exploration)
-  async function locate(page: Page, a: { role: string; name: string; nth: number; css: string }) {
-    if (a.name) {
-      const byRole = page.getByRole(a.role as Parameters<Page['getByRole']>[0], { name: a.name, exact: true });
-      if (await byRole.count() > a.nth) return byRole.nth(a.nth);
-    }
-    return page.locator(a.css).first();     // fallback selector captured at discovery time
-  }
-  async function perform(s: Session, a: Action): Promise<string | null> {
-    try {
-      if (a.kind === 'click') {
-        await (await locate(s.page, a)).click({ timeout: 2500 });
-      } else {
-        for (const f of a.fields) {
-          const loc = s.page.locator(f.css).first();
-          if (f.type === 'select') { if (a.variant !== 'empty' && f.options?.length) await loc.selectOption({ index: 0 }, { timeout: 1500 }); continue; }
-          if (f.type === 'checkbox' || f.type === 'radio') { if (a.variant === 'valid') await loc.check({ timeout: 1500 }).catch(() => {}); continue; }
-          const v = valueFor(f, a.variant, cfg);
-          if (v !== null) await loc.fill(v, { timeout: 1500 });
-        }
-        if (a.submit) await (await locate(s.page, a.submit)).click({ timeout: 2500 });
-        else if (a.fields.length) await s.page.locator(a.fields[a.fields.length - 1].css).first().press('Enter', { timeout: 1500 });
-      }
-      await s.tr.settle();
-      return null;
-    } catch (e) { return String((e as Error).message).split('\n')[0].slice(0, 160); }
-  }
+  // performing actions is shared with the replayer (driver package) so replay can never diverge from exploration
+  const perform = (s: Session, a: Action) => performAction(s.page, () => s.tr.settle(), cfg, a);
 
   const take = async (s: Session) => { const snap = await snapshot(s.page); return { snap, url: s.page.url() }; };
 
@@ -203,16 +122,17 @@ export async function crawl(baseUrl: string, cfg: TargetConfig, budget: Budget, 
         }
         if (replayErr) { stats.replayDrift++; log(`drift on ${task.action.label} from ${task.node.id}: ${replayErr}`); continue; }
 
-        const before = { url: s.page.url(), fine: task.node.fine, requests: s.requests };
-        s.obs = freshObs();
+        const before = { url: s.page.url(), fine: task.node.fine, requests: s.requests, mut: await s.tr.lastMutation() };
+        s.resetObs();
         const err = await perform(s, task.action);
         stats.executed++;
-        if (err) { stats.actionErrors++; s.obs.actionError = err; edges.push({ from: task.node.id, to: task.node.id, label: task.action.label, obs: s.obs }); continue; }
+        if (err) { stats.actionErrors++; s.obs.actionError = err; edges.push({ from: task.node.id, to: task.node.id, label: task.action.label, action: task.action, obs: s.obs }); continue; }
         const after = await take(s);
         const { node: dest, isNew } = register(after.snap, after.url, [...task.node.path, task.action], task.node.depth + 1);
-        s.obs.noEffect = dest.fine === before.fine && after.url === before.url && s.requests === before.requests;
+        s.obs.domMutated = (await s.tr.lastMutation()) > before.mut;
+        s.obs.noEffect = dest.fine === before.fine && after.url === before.url && s.requests === before.requests && !s.obs.domMutated;
         if (s.obs.noEffect) stats.noEffectActions++;
-        edges.push({ from: task.node.id, to: dest.id, label: task.action.label, obs: s.obs });
+        edges.push({ from: task.node.id, to: dest.id, label: task.action.label, action: task.action, obs: s.obs });
         if (isNew) log(`new ${dest.id} d${dest.depth} ${dest.evidence.route} [${dest.evidence.headings[0] ?? ''}] via ${task.action.label}`);
       } finally { await s.ctx.close().catch(() => {}); }
     }

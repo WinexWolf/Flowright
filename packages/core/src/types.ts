@@ -59,3 +59,37 @@ export interface ExplorationResult {
 }
 
 export interface Budget { maxSteps: number; maxTimeMs: number; maxStates?: number }
+
+// ---------------------------------------------------------------- actions, graph, flows, findings (shared plain data)
+export type Variant = 'valid' | 'empty' | 'invalid';
+export type Action =
+  | { kind: 'click'; role: string; name: string; nth: number; css: string; label: string }
+  | { kind: 'form'; variant: Variant; fields: FieldSpec[]; submit: { css: string; name: string; role: string; nth: number } | null; label: string };
+
+export interface Obs {
+  consoleErrors: string[]; pageErrors: string[]; failedRequests: string[];
+  badResponses: string[];          // "<status> <resourceType> <url>"
+  noEffect: boolean;               // no URL change, no state change, no request, no DOM mutation
+  domMutated?: boolean; actionError?: string;
+}
+export interface StateNode {
+  id: string; fine: string; coarse: string; treeHash: string; overlay: string;
+  url: string; urlTemplate: string; evidence: Evidence; depth: number; path: Action[];
+}
+export interface Edge { from: string; to: string; label: string; action: Action; obs: Obs }
+export interface CrawlGraph { states: StateNode[]; edges: Edge[]; cycles: string[][] }
+
+/** A compiled, replayable flow: plain data, no AI needed to run it. */
+export interface Flow {
+  id: string; name: string; startPath: string; steps: Action[];
+  expect: { route: string; treeHash: string; overlay: string; heading?: string };
+}
+
+export type FindingKind = 'console-error' | 'failed-request' | 'broken-link' | 'dead-click' | 'overflow' | 'broken-image' | 'empty-route' | 'missing-validation';
+export interface OracleFinding {
+  kind: FindingKind; route: string; detail: string;
+  severity: 'error' | 'suspect';           // suspect = inferred by comparing probes (form-probe), not a direct browser signal
+  signature: string;                       // stable key for dedupe / confirmation
+  path: Action[];                          // steps from the start URL that reproduce it (including the triggering action)
+  probe?: { valid: Action; variant: Action; from: string };   // missing-validation only
+}

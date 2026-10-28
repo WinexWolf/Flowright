@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { chromium, type Browser, type Page } from 'playwright';
 import { fingerprint } from '@flowright/core';
-import { snapshot } from '../src/snapshot.js';
+import { snapshot } from '@flowright/driver';
 
 let browser: Browser; let page: Page;
 beforeAll(async () => { browser = await chromium.launch(); page = await browser.newPage(); });
