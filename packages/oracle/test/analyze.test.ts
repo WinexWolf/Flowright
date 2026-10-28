@@ -70,4 +70,14 @@ describe('oracle: form probes', () => {
     const f = analyze(G(S, [edge('src', 'ok', form('valid', '/f|a', t)), edge('src', 'ok', form('invalid', '/f|a', t)), edge('src', 'ok', form('empty', '/f|a', t))]));
     expect(f.map(x => x.detail)).toEqual(['form accepted empty input and ended in the same state as valid input']);
   });
+  it('accepted-but-structurally-different outcome (blank row added) still counts as accepted', () => {
+    const SS = [st('src', '/#/tasks'), st('ok', '/#/tasks'), st('blank', '/#/tasks')];
+    const f = analyze(G(SS, [edge('src', 'ok', form('valid', '/f|a', 'text')), edge('src', 'blank', form('empty', '/f|a', 'text'))]));
+    expect(f.map(x => x.kind)).toEqual(['missing-validation']);
+  });
+  it('...but not when the empty submit leaves an alert or the dialog open', () => {
+    const SS = [st('src', '/#/tasks'), st('ok', '/#/tasks'), st('err', '/#/tasks', 1, { alerts: ['Title is required'] }), st('open', '/#/tasks', 1, { dialogs: ['New task'] })];
+    expect(analyze(G(SS, [edge('src', 'ok', form('valid', '/f|a', 'text')), edge('src', 'err', form('empty', '/f|a', 'text'))]))).toHaveLength(0);
+    expect(analyze(G(SS, [edge('src', 'ok', form('valid', '/f|a', 'text')), edge('src', 'open', form('empty', '/f|a', 'text'))]))).toHaveLength(0);
+  });
 });

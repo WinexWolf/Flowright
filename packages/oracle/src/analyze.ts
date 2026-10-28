@@ -64,7 +64,13 @@ export function analyze(g: CrawlGraph): OracleFinding[] {
     const src = byId.get(valid.from)!;
     for (const v of ['empty', 'invalid'] as const) {
       if (v === 'invalid' && !valid.action.fields.some(f => CONSTRAINED.has(f.type))) continue;
-      const pe = grp[v]; if (!pe || pe.to !== valid.to) continue;
+      const pe = grp[v]; if (!pe) continue;
+      // "accepted" = same outcome as valid input. Exact-state equality is too brittle (an accepted blank item can add a zero-width row),
+      // so also accept: both land on the same route template, neither shows an alert, neither still shows a dialog, and both left the form's state.
+      const vd = byId.get(valid.to), pd = byId.get(pe.to);
+      const sameOutcome = pe.to === valid.to || (!!vd && !!pd && pe.to !== pe.from && vd.urlTemplate === pd.urlTemplate
+        && !vd.evidence.alerts.length && !pd.evidence.alerts.length && !vd.evidence.dialogs.length && !pd.evidence.dialogs.length);
+      if (!sameOutcome) continue;
       add('missing-validation', src, `form accepted ${v} input and ended in the same state as valid input`, [...src.path, pe.action], 'suspect', { valid: valid.action, variant: pe.action, from: src.id });
     }
   }
