@@ -27,13 +27,13 @@ if (flag('oracle') === 'true') {
   const { evaluateApp } = await import('./oracleRun.js');
   const which = (flag('bugs', 'dev') as 'dev' | 'heldout');
   if (which === 'heldout' && !includeHeldout) { console.error('--bugs heldout requires --include-heldout'); process.exit(2); }
-  const targetApps = which === 'heldout' ? [...DEV_APPS, ...HELDOUT_APPS] : apps.filter(a => DEV_APPS.includes(a));
+  const targetApps = flag('apps') ? (flag('apps') as string).split(',') : (which === 'heldout' ? [...DEV_APPS, ...HELDOUT_APPS] : apps.filter(a => DEV_APPS.includes(a)));
   const results = [];
   for (const app of targetApps) {
     process.stderr.write(`[oracle] ${app} (${which})...\n`);
     const r = await evaluateApp(app, which, budget, Number(flag('replay-runs', '3')), (flag('mode', 'isolated') as 'isolated' | 'combined'));
     results.push(r);
-    console.log(`\n== ${app} [${which} bugs, ${(r as any).mode}] recall ${r.detected.length}/${r.enabled.length}  | replay success ${(r.replay.successRate * 100).toFixed(1)}% over ${r.replay.runs} runs (${r.replay.flows} flows)  | confirmed ${r.confirmed}, unconfirmed ${r.unconfirmed}`);
+    console.log(`\n== ${app} [${which} bugs, ${(r as any).mode}] recall ${r.detected.length}/${r.enabled.length} (strict original rules: ${(r as any).detectedStrict.length}/${r.enabled.length})  | replay success ${(r.replay.successRate * 100).toFixed(1)}% over ${r.replay.runs} runs (${r.replay.flows} flows)  | confirmed ${r.confirmed}, unconfirmed ${r.unconfirmed}`);
     console.log('   detected:', r.detected.join(', ') || '-'); console.log('   missed:  ', r.missed.join(', ') || '-');
     console.log('   false positives on bug-injected app:', r.falsePositives.length ? '' : 'none'); for (const f of r.falsePositives) console.log(`     - [${f.severity}] ${f.kind} @ ${f.route}: ${f.detail}`);
     console.log('   false positives on CLEAN app:', r.cleanFalsePositives.length ? '' : 'none'); for (const f of r.cleanFalsePositives) console.log(`     - [${f.severity}] ${f.kind} @ ${f.route}: ${f.detail}`);

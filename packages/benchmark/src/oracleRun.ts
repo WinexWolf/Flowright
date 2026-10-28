@@ -12,15 +12,17 @@ import { TARGETS } from './targets.js';
 import type { Budget } from '@flowright/core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-interface Bug { id: string; app: string; kind: string; split: 'dev' | 'heldout'; where: string; match: { kinds: string[]; route: string } }
+interface Bug { id: string; app: string; kind: string; split: 'dev' | 'heldout'; where: string; match: { kinds: string[]; route: string }; matchOriginal?: { kinds: string[]; route: string } }
 const allBugs = (): Bug[] => JSON.parse(fs.readFileSync(path.join(here, '../labels/bugs.json'), 'utf8')).bugs;
 interface Errata { id: string; app: string; kinds: string[]; route: string }
 const errata = (): Errata[] => JSON.parse(fs.readFileSync(path.join(here, '../labels/errata.json'), 'utf8')).defects;
 const isErrata = (app: string, f: OracleFinding) => errata().some(e => e.app === app && e.kinds.includes(f.kind) && new RegExp(e.route).test(f.route));
 const hits = (b: Bug, f: OracleFinding) => b.match.kinds.includes(f.kind) && new RegExp(b.match.route).test(f.route);
+/** The rules as committed BEFORE the oracle existed (a bug that was never widened has no matchOriginal, so its rule is unchanged). */
+const hitsStrict = (b: Bug, f: OracleFinding) => { const m = b.matchOriginal ?? b.match; return m.kinds.includes(f.kind) && new RegExp(m.route).test(f.route); };
 
 export interface OracleRunResult {
-  app: string; split: string; enabled: string[]; detected: string[]; missed: string[];
+  app: string; split: string; enabled: string[]; detected: string[]; missed: string[]; detectedStrict: string[];
   recall: number; confirmed: number; unconfirmed: number; falsePositives: { kind: string; route: string; detail: string; severity: string }[];
   cleanFalsePositives: { kind: string; route: string; detail: string; severity: string }[];
   replay: { flows: number; runs: number; successRate: number; flaky: string[]; failing: string[] };
@@ -57,13 +59,13 @@ export async function evaluateApp(app: string, which: 'dev' | 'heldout', budget:
     const replay = await measureReplay(browser, clean.running.baseUrl, clean.cfg, flows, replayK);
     await clean.running.stop();
 
-    const t0 = Date.now(); const perBug: PerBug[] = []; const detected = new Set<string>(); const fpSeen = new Map<string, Brief>(); const errSeen = new Map<string, Brief>();
+    const t0 = Date.now(); const perBug: PerBug[] = []; const detected = new Set<string>(); const detectedStrict = new Set<string>(); const fpSeen = new Map<string, Brief>(); const errSeen = new Map<string, Brief>();
     const found: OracleRunResult['found'] = []; let confirmedN = 0, unconfirmedN = 0;
     const runs: Bug[][] = mode === 'isolated' ? enabled.map(b => [b]) : [enabled];
     for (const set of runs) {
       const d = await findConfirmed(app, set.map(b => b.id), budget, browser); await d.running.stop();
       confirmedN += d.confirmed.length; unconfirmedN += d.unconfirmed.length;
-      for (const b of set) if (d.confirmed.some(f => hits(b, f))) detected.add(b.id);
+      for (const b of set) { if (d.confirmed.some(f => hits(b, f))) detected.add(b.id); if (d.confirmed.some(f => hitsStrict(b, f))) detectedStrict.add(b.id); }
       const fps: Brief[] = [], errs: Brief[] = [];
       for (const f of d.confirmed) {
         if (set.some(b => hits(b, f))) continue;
@@ -74,7 +76,7 @@ export async function evaluateApp(app: string, which: 'dev' | 'heldout', budget:
     }
     const cleanFP = clean.confirmed.filter(f => !isErrata(app, f)).map(brief);
     return {
-      mode, perBug, app, split: which, enabled: enabled.map(b => b.id), detected: [...detected], missed: enabled.filter(b => !detected.has(b.id)).map(b => b.id),
+      mode, perBug, app, split: which, enabled: enabled.map(b => b.id), detected: [...detected], detectedStrict: [...detectedStrict], missed: enabled.filter(b => !detected.has(b.id)).map(b => b.id),
       recall: enabled.length ? detected.size / enabled.length : 1, confirmed: confirmedN, unconfirmed: unconfirmedN,
       falsePositives: [...fpSeen.values()], cleanFalsePositives: cleanFP,
       replay: { flows: replay.flows, runs: replay.runs, successRate: replay.successRate, flaky: replay.flaky, failing: replay.failing },
