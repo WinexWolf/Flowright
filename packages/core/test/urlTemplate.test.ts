@@ -48,3 +48,13 @@ describe('UrlTemplater', () => {
     expect(t.template(`${B}/settings/billing`)).toBe('/settings/:slug');
   });
 });
+
+describe('UrlTemplater.version (lets a crawler know earlier states must be re-keyed)', () => {
+  it('increments only when a genuinely new (parent, child) pair is learned', () => {
+    const t = new UrlTemplater(); const v0 = t.version;
+    t.observe('http://x/books/dune'); const v1 = t.version;
+    t.observe('http://x/books/dune'); expect(t.version).toBe(v1);        // repeat: no change
+    t.observe('http://x/books/emma'); expect(t.version).toBeGreaterThan(v1);
+    expect(v1).toBeGreaterThan(v0);
+  });
+});

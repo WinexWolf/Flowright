@@ -73,9 +73,12 @@ async function taskDetail(id) {
   };
   $('#edit').onclick = () => {
     $('#overlay').innerHTML = `<div class="overlay"><div role="dialog" aria-modal="true" aria-labelledby="dt" style="background:#fff;padding:20px;min-width:320px">
-<h2 id="dt">Edit task</h2><label>Title <input id="etitle" type="text" value="${h(t.title)}"></label><button id="save">Save changes</button> <button id="cancel">Cancel</button></div></div>`;
+<h2 id="dt">Edit task</h2><div id="formerr"></div><label>Title <input id="etitle" type="text" value="${h(t.title)}"></label><button id="save">Save changes</button> <button id="cancel">Cancel</button></div></div>`;
     $('#cancel').onclick = closeDialog;
-    $('#save').onclick = async () => { await api('/api/tasks/' + id, { method: 'PATCH', body: { title: $('#etitle').value } }); closeDialog(); taskDetail(id); };
+    $('#save').onclick = async () => {
+      try { await api('/api/tasks/' + id, { method: 'PATCH', body: { title: $('#etitle').value } }); closeDialog(); taskDetail(id); }
+      catch (e) { $('#formerr').innerHTML = `<div role="alert" class="err">${h(e.body?.error || 'Could not save')}</div>`; }
+    };
   };
 }
 async function projects() {

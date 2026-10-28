@@ -81,3 +81,22 @@ describe('oracle: form probes', () => {
     expect(analyze(G(SS, [edge('src', 'ok', form('valid', '/f|a', 'text')), edge('src', 'open', form('empty', '/f|a', 'text'))]))).toHaveLength(0);
   });
 });
+
+describe('oracle: M1/M2 audit regressions', () => {
+  const probeGraph = (invalidObs: Partial<Obs>, method?: string) => {
+    const mk = (v: 'valid' | 'empty' | 'invalid'): Action => ({ ...(form(v) as Extract<Action, { kind: 'form' }>), method });
+    return G([st('a', '/join'), st('b', '/welcome')], [
+      edge('a', 'b', mk('valid')),                       // valid input leaves the form
+      edge('a', 'b', mk('invalid'), invalidObs),         // invalid input ALSO leaves the form
+    ]);
+  };
+  it('baseline: an invalid probe that is accepted like valid input is flagged', () => {
+    expect(analyze(probeGraph({})).some(x => x.kind === 'missing-validation')).toBe(true);
+  });
+  it('a probe blocked by the browser\'s own validation is NOT a missing-validation finding', () => {
+    expect(analyze(probeGraph({ nativeBlocked: true })).some(x => x.kind === 'missing-validation')).toBe(false);
+  });
+  it('GET forms (searches/filters) are never judged on blank/invalid input', () => {
+    expect(analyze(probeGraph({}, 'GET')).some(x => x.kind === 'missing-validation')).toBe(false);
+  });
+});

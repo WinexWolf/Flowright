@@ -33,7 +33,7 @@ const MUTATION_PROBE = `(() => {
  * Network-only settling caused stale snapshots on single-page apps, which showed up as replay drift.
  */
 export function trackInflight(page: Page) {
-  let inflight = 0; let lastActivity = Date.now();
+  let inflight = 0; let lastActivity = Date.now(); let timeouts = 0;
   const bump = () => { lastActivity = Date.now(); };
   page.addInitScript(MUTATION_PROBE).catch(() => {});
   page.on('request', () => { inflight++; bump(); });
@@ -41,16 +41,19 @@ export function trackInflight(page: Page) {
   page.on('requestfailed', () => { inflight = Math.max(0, inflight - 1); bump(); });
   return {
     get inflight() { return inflight; },
+    /** How many settle() calls gave up waiting (a page that never goes quiet: polling, animation). */
+    get timeouts() { return timeouts; },
     async lastMutation(): Promise<number> { try { return (await page.evaluate(`window.__frLastMut || 0`)) as number; } catch { return 0; } },
-    async settle(quietMs = 150, maxMs = 4000) {
+    async settle(quietMs = 150, maxMs = 4000): Promise<boolean> {
       const start = Date.now(); bump();
       await page.waitForLoadState('domcontentloaded').catch(() => {});
       while (Date.now() - start < maxMs) {
         let domQuiet = true;
         try { domQuiet = (await page.evaluate(`Date.now() - (window.__frLastMut || 0)`) as number) >= quietMs; } catch { domQuiet = false; }   // mid-navigation: not quiet
-        if (inflight === 0 && Date.now() - lastActivity >= quietMs && domQuiet) return;
+        if (inflight === 0 && Date.now() - lastActivity >= quietMs && domQuiet) return false;
         await page.waitForTimeout(40);
       }
+      timeouts++; return true;      // gave up: caller records it instead of silently trusting a possibly-unsettled snapshot
     },
   };
 }

@@ -22,7 +22,7 @@ export interface InteractiveEl {
   inModal: boolean;
 }
 export interface FieldSpec { name: string; type: string; label: string; required: boolean; css: string; options?: string[] }
-export interface FormGroup { id: number; fields: FieldSpec[]; submit?: { css: string; name: string; role: string; nth: number } | null; action?: string; key: string; inModal: boolean }
+export interface FormGroup { id: number; fields: FieldSpec[]; submit?: { css: string; name: string; role: string; nth: number } | null; action?: string; method: string; key: string; inModal: boolean }
 
 export interface PageSnapshot {
   evidence: Evidence;
@@ -63,14 +63,16 @@ export interface Budget { maxSteps: number; maxTimeMs: number; maxStates?: numbe
 // ---------------------------------------------------------------- actions, graph, flows, findings (shared plain data)
 export type Variant = 'valid' | 'empty' | 'invalid';
 export type Action =
-  | { kind: 'click'; role: string; name: string; nth: number; css: string; label: string }
-  | { kind: 'form'; variant: Variant; fields: FieldSpec[]; submit: { css: string; name: string; role: string; nth: number } | null; label: string };
+  | { kind: 'click'; role: string; name: string; nth: number; css: string; label: string; href?: string }
+  | { kind: 'form'; variant: Variant; fields: FieldSpec[]; submit: { css: string; name: string; role: string; nth: number } | null; label: string; method?: string };
 
 export interface Obs {
   consoleErrors: string[]; pageErrors: string[]; failedRequests: string[];
   badResponses: string[];          // "<status> <resourceType> <url>"
   noEffect: boolean;               // no URL change, no state change, no request, no DOM mutation
   domMutated?: boolean; actionError?: string;
+  nativeBlocked?: boolean;         // the browser's own form validation stopped the submit (not a dead click)
+  settleTimedOut?: boolean;        // the page never went quiet within the settle budget (polling/animation)
 }
 export interface StateNode {
   id: string; fine: string; coarse: string; treeHash: string; overlay: string;

@@ -48,6 +48,9 @@ export function fingerprint(urlTemplate: string, tree: RawNode[], tabs: { select
   return { coarse, fine, treeHash, overlay: overlay + '#' + tabsel };
 }
 
+/** The coarse key for a stored state (used when URL templates are learned after a state was registered). */
+export function coarseFrom(urlTemplate: string, treeHash: string): string { return h(urlTemplate + '#' + treeHash); }
+
 /** Recompute identity from stored parts (used to merge states after URL-template learning). */
 export function fineFrom(urlTemplate: string, treeHash: string, overlayKey: string): string {
   const coarse = h(urlTemplate + '#' + treeHash);

@@ -38,7 +38,10 @@ createApp({
       const t = state.tasks.find(x => x.id === Number(tm[1]));
       if (!t) return sendJson(404, { error: 'not found' });
       if (req.method === 'GET') return sendJson(200, t);
-      if (req.method === 'PATCH') { Object.assign(t, json); return sendJson(200, t); }
+      if (req.method === 'PATCH') {
+        if ('title' in json && !String(json.title || '').trim()) return sendJson(422, { error: 'Title is required' });   // fixed latent defect: edit used to accept blank titles
+        Object.assign(t, json); return sendJson(200, t);
+      }
       if (req.method === 'DELETE') { state.tasks = state.tasks.filter(x => x !== t); return sendJson(200, { ok: true }); }
     }
     if (p === '/api/projects') {

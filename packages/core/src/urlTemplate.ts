@@ -11,6 +11,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export class UrlTemplater {
   private seen = new Map<string, Set<string>>();
+  /** Increments whenever observe() learns a new (parent, child) pair, i.e. whenever earlier templates may have changed. */
+  version = 0;
   constructor(private cfg: Pick<TargetConfig, 'staticSegments' | 'urlOverrides'> = {}, private learnThreshold = 3) {}
 
   /** Record a URL so learned rules can kick in. Call for every visited URL before template(). */
@@ -20,7 +22,7 @@ export class UrlTemplater {
       for (let i = 1; i < segs.length; i++) {
         const parent = segs.slice(0, i).join('/');
         if (!this.seen.has(parent)) this.seen.set(parent, new Set());
-        this.seen.get(parent)!.add(segs[i]);
+        const set = this.seen.get(parent)!; if (!set.has(segs[i])) { set.add(segs[i]); this.version++; }
       }
     }
   }

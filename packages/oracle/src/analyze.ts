@@ -61,10 +61,12 @@ export function analyze(g: CrawlGraph): OracleFinding[] {
     const valid = grp.valid; if (!valid || valid.action.kind !== 'form') continue;
     if (!valid.action.fields.some(f => TEXTY.has(f.type))) continue;     // checkbox-only / search forms have nothing to validate
     if (valid.to === valid.from) continue;                               // valid input changed nothing observable: no baseline to compare
+    if (valid.action.kind === 'form' && valid.action.method === 'GET') continue;   // GET forms are searches/filters: blank input is a legitimate query
     const src = byId.get(valid.from)!;
     for (const v of ['empty', 'invalid'] as const) {
       if (v === 'invalid' && !valid.action.fields.some(f => CONSTRAINED.has(f.type))) continue;
       const pe = grp[v]; if (!pe) continue;
+      if (pe.obs.nativeBlocked) continue;                // the browser itself blocked the submit: the form IS validated, client-side
       // "accepted" = same outcome as valid input. Exact-state equality is too brittle (an accepted blank item can add a zero-width row),
       // so also accept: both land on the same route template, neither shows an alert, neither still shows a dialog, and both left the form's state.
       const vd = byId.get(valid.to), pd = byId.get(pe.to);

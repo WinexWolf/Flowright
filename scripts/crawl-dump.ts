@@ -10,3 +10,6 @@ const flagged = res.graph.edges.filter(e => e.obs.consoleErrors.length || e.obs.
 console.log('\nedges with raw observations:', flagged.length);
 for (const e of flagged) console.log(' ', e.from, '->', e.to, e.label, JSON.stringify({ c: e.obs.consoleErrors.length, p: e.obs.pageErrors.length, bad: e.obs.badResponses, noEffect: e.obs.noEffect, err: e.obs.actionError }));
 console.log('\ncycles:', JSON.stringify(res.graph.cycles));
+console.log('\nSTATS', JSON.stringify(res.stats));
+const needle = process.argv[4];
+if (needle) { for (const e of res.graph.edges.filter(e => e.label.includes(needle))) console.log('EDGE', e.from, '->', e.to, e.label, JSON.stringify(e.obs).slice(0, 200)); }

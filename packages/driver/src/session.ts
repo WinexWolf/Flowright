@@ -15,7 +15,8 @@ export async function openSession(browser: Browser, baseUrl: string, cfg: Target
   const ctx = await browser.newContext({ viewport: cfg.viewport ?? { width: 1280, height: 720 }, storageState: cfg.storageState });
   await ctx.route(u => !allowed.has(new URL(u.toString()).host), r => r.abort());
   const page = await ctx.newPage();
-  page.on('dialog', d => d.accept().catch(() => {}));
+  // confirm()/prompt() dialogs: accepting is how a flow proceeds, but it can also confirm a destructive action, so only sandbox targets accept.
+  page.on('dialog', d => (cfg.sandbox ? d.accept() : d.dismiss()).catch(() => {}));
   const s: Session = { ctx, page, tr: trackInflight(page), obs: freshObs(), requests: 0, resetObs() { s.obs = freshObs(); } };
   page.on('request', () => { s.requests++; });
   page.on('console', m => { if (m.type() === 'error') s.obs.consoleErrors.push(m.text().slice(0, 300)); });

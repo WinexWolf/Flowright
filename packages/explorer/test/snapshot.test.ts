@@ -56,3 +56,35 @@ describe('regression: zero-size wrapper around a fixed-position modal', () => {
     expect(open.fine).not.toBe(closed.fine);
   });
 });
+
+describe('extractor: toggles, clickables, form method (M1 audit fixes)', () => {
+  it('standalone checkbox / switch are exercised as clicks, not dropped', async () => {
+    await page.setContent(shell('<label><input type="checkbox" id="dark"> Dark mode</label><div role="switch" aria-checked="false" tabindex="0" aria-label="Beta features">Beta</div>'));
+    const s = await snapshot(page);
+    expect(s.interactive.find(i => i.role === 'checkbox')?.name).toContain('Dark mode');
+    expect(s.interactive.some(i => i.role === 'switch')).toBe(true);
+    expect(s.forms).toHaveLength(0);
+  });
+  it('a section holding only toggles and no submit dissolves into plain clicks', async () => {
+    await page.setContent(shell('<section><h2>Prefs</h2><label><input type="checkbox"> Email</label><label><input type="checkbox"> Push</label></section>'));
+    const s = await snapshot(page);
+    expect(s.forms).toHaveLength(0);
+    expect(s.interactive.filter(i => i.role === 'checkbox')).toHaveLength(2);
+  });
+  it('role-less div with onclick or cursor:pointer is found once (outermost only)', async () => {
+    await page.setContent(shell('<div onclick="x()" id="c1">Open card</div><div style="cursor:pointer" id="c2"><span>Pricing <b>tile</b></span></div><div>plain text</div>'));
+    const s = await snapshot(page);
+    const cl = s.interactive.filter(i => i.role === 'clickable');
+    expect(cl.map(c => c.name).sort()).toEqual(['Open card', 'Pricing tile']);
+  });
+  it('clickables inside real links/buttons are not double-counted', async () => {
+    await page.setContent(shell('<a href="/x"><div style="cursor:pointer">Inside link</div></a><button><span style="cursor:pointer">Inside button</span></button>'));
+    const s = await snapshot(page);
+    expect(s.interactive.filter(i => i.role === 'clickable')).toHaveLength(0);
+  });
+  it('records form method, so GET search forms can be told apart from POST forms', async () => {
+    await page.setContent(shell('<form action="/search" method="get"><input name="q" type="search" aria-label="Search"><button>Go</button></form><form action="/join" method="post"><input name="email" type="email" aria-label="Email"><button>Join</button></form>'));
+    const s = await snapshot(page);
+    expect(s.forms.map(f => f.method).sort()).toEqual(['GET', 'POST']);
+  });
+});

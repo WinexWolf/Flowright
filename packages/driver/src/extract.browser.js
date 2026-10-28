@@ -1,7 +1,11 @@
 (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'META', 'LINK', 'HEAD', 'TITLE']);
-  const LEAF = new Set(['link', 'button', 'checkbox', 'radio', 'textbox', 'searchbox', 'combobox', 'slider', 'spinbutton', 'tab', 'menuitem', 'img'])
-  const ACT = new Set(['link', 'button', 'checkbox', 'radio', 'textbox', 'searchbox', 'combobox', 'slider', 'spinbutton', 'tab', 'menuitem']);
+  const LEAF = new Set(['link', 'button', 'checkbox', 'radio', 'switch', 'textbox', 'searchbox', 'combobox', 'slider', 'spinbutton', 'tab', 'menuitem', 'img', 'clickable']);
+  const ACT = new Set(['link', 'button', 'checkbox', 'radio', 'switch', 'textbox', 'searchbox', 'combobox', 'slider', 'spinbutton', 'tab', 'menuitem']);
+  const FIELD = new Set(['textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'spinbutton', 'slider']);
+  const TOGGLE = new Set(['checkbox', 'radio', 'switch']);
+  const INTERACTIVE_SEL = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=switch],[role=radio]';
+
   const vis = (el) => {
     if (!el.isConnected) return false;
     if (el.checkVisibility && !el.checkVisibility({ checkVisibilityCSS: true })) return false;
@@ -60,10 +64,31 @@
     return parts.join(' > ');
   };
 
+  // ---- role-less clickable elements (div/span with onclick or cursor:pointer and nothing interactive inside/around them)
+  const clickables = [];
+  {
+    const cands = new Set();
+    let seen = 0;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    for (let n = walker.nextNode(); n && seen < 4000; n = walker.nextNode(), seen++) {
+      if (SKIP.has(n.tagName) || roleOf(n) || n.closest(INTERACTIVE_SEL)) continue;
+      if (n.querySelector(INTERACTIVE_SEL)) continue;
+      const hasHandler = n.hasAttribute('onclick');
+      if (!hasHandler && getComputedStyle(n).cursor !== 'pointer') continue;
+      if (!vis(n)) continue;
+      const r = n.getBoundingClientRect(); if (r.width < 8 || r.height < 8) continue;
+      if (!(n.innerText || '').trim() && !n.getAttribute('aria-label')) continue;
+      cands.add(n);
+    }
+    // cursor:pointer is inherited: keep only the outermost candidate of each cluster
+    for (const n of cands) { let p = n.parentElement, nested = false; while (p) { if (cands.has(p)) { nested = true; break; } p = p.parentElement; } if (!nested) clickables.push(n); }
+  }
+
   // ---- structural tree (generic wrappers flattened; leaves for interactive roles)
   const walk = (el) => {
     if (SKIP.has(el.tagName) || el.getAttribute('aria-hidden') === 'true' || !shown(el)) return [];
-    const role = roleOf(el);
+    let role = roleOf(el);
+    if (!role && clickables.includes(el)) role = 'clickable';
     if (role && (LEAF.has(role) || /^heading/.test(role))) return vis(el) ? [{ r: role }] : [];
     const kids = [];
     for (const c of el.children) kids.push(...walk(c));
@@ -74,57 +99,64 @@
   for (const c of document.body.children) tree.push(...walk(c));
 
   // ---- interactive elements
-  const interactive = []; const counts = {};
-  const groupEls = []; const groupOf = (el) => {
-    if (!['textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'spinbutton', 'slider', 'button'].includes(roleOf(el))) return null;
-    return el.closest('form, [role=dialog], dialog, fieldset, section') || null;
-  };
-  const all = document.body.querySelectorAll('*');
-  const fieldCapable = (el) => ['textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'spinbutton', 'slider'].includes(roleOf(el));
-  const groups = new Map();   // groupEl -> {id, fields, buttons}
+  const counts = {};
+  const groupOf = (el) => (FIELD.has(roleOf(el)) || roleOf(el) === 'button') ? (el.closest('form, [role=dialog], dialog, fieldset, section') || null) : null;
   const items = [];
-  for (const el of all) {
-    if (SKIP.has(el.tagName) || el.closest('[aria-hidden=true]')) continue;
-    const role = roleOf(el);
-    if (!role || !ACT.has(role) || !vis(el)) continue;
+  const register = (el, role) => {
     const name = nameOf(el);
     const key = role + '|' + name;
     const nth = counts[key] = (counts[key] === undefined ? 0 : counts[key] + 1);
-    const ge = groupOf(el);
-    items.push({ el, role, name, nth, ge });
-    if (ge && fieldCapable(el)) { if (!groups.has(ge)) groups.set(ge, { id: groups.size, fields: [], el: ge }); }
+    items.push({ el, role, name, nth, ge: groupOf(el) });
+  };
+  for (const el of document.body.querySelectorAll('*')) {
+    if (SKIP.has(el.tagName) || el.closest('[aria-hidden=true]')) continue;
+    const role = roleOf(el);
+    if (!role || !ACT.has(role) || !vis(el)) continue;
+    register(el, role);
   }
+  for (const el of clickables) register(el, 'clickable');
+
+  // A group is a unit of fields + (optionally) a submit button. Groups made only of toggles with no submit dissolve:
+  // their checkboxes become ordinary clickable controls.
+  const groups = new Map();
+  for (const it of items) if (it.ge && FIELD.has(it.role)) { if (!groups.has(it.ge)) groups.set(it.ge, { id: -1, fields: [], el: it.ge }); }
   const submitName = /^(save|create|submit|add|send|sign in|log in|login|search|apply|confirm|update|post|place|continue|next|done|join|register)/i;
   const forms = [];
   for (const [ge, g] of groups) {
-    const fields = [];
-    let submit = null;
+    const fields = []; let submit = null;
     for (const it of items) {
       if (it.ge !== ge) continue;
       const el = it.el;
-      if (fieldCapable(el) && !el.disabled) {
+      if (FIELD.has(it.role) && !el.disabled) {
         const opts = el.tagName === 'SELECT' ? Array.from(el.options).map(o => o.value || o.text).slice(0, 8) : undefined;
-        fields.push({ name: el.name || el.id || it.name, type: (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase(), label: it.name, required: !!el.required, css: cssPath(el), options: opts });
+        fields.push({ name: el.name || el.id || it.name, type: (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase(), label: it.name, required: !!el.required, css: cssPath(el), options: opts, role: it.role });
       } else if (it.role === 'button' && !submit) {
         const isSubmit = ge.tagName === 'FORM' ? (el.type === 'submit' || (el.tagName === 'BUTTON' && !el.getAttribute('type'))) : submitName.test(it.name);
         if (isSubmit) submit = { css: cssPath(el), name: it.name, role: it.role, nth: it.nth };
       }
     }
-    g.fieldsList = fields;
-    const action = ge.tagName === 'FORM' ? (ge.getAttribute('action') || location.pathname) : 'inline';
-    forms.push({ id: g.id, fields, submit, action, inModal: !!ge.closest('[role=dialog], dialog[open]'), key: action + '|' + fields.map(f => f.name).join(',') });
+    const onlyToggles = fields.length > 0 && fields.every(f => TOGGLE.has(f.role));
+    if (!fields.length || (onlyToggles && !submit)) { g.dissolved = true; continue; }
+    g.id = forms.length;
+    g.fields = fields; g.submit = submit;
+    const isForm = ge.tagName === 'FORM';
+    const action = isForm ? (ge.getAttribute('action') || location.pathname) : 'inline';
+    const method = isForm ? ((ge.getAttribute('method') || 'get').toUpperCase()) : 'INLINE';
+    forms.push({ id: g.id, fields: fields.map(f => ({ name: f.name, type: f.type, label: f.label, required: f.required, css: f.css, options: f.options })), submit, action, method, inModal: !!ge.closest('[role=dialog], dialog[open]'), key: action + '|' + fields.map(f => f.name).join(',') });
   }
-  const submitCss = new Set(forms.filter(f => f.fields.length && f.submit).map(f => f.submit.css));
+  const interactive = [];
+  const submitCss = new Set(forms.filter(f => f.submit).map(f => f.submit.css));
   for (const it of items) {
     const el = it.el; const g = it.ge ? groups.get(it.ge) : null;
     const css = cssPath(el);
-    // field-bearing groups are driven as a unit; their individual fields/submit are not separate actions
-    if (g && g.fieldsList && g.fieldsList.length && (fieldCapable(el) || submitCss.has(css))) continue;
-    if (fieldCapable(el)) continue;
+    const grouped = g && !g.dissolved;
+    if (grouped && (FIELD.has(it.role) || submitCss.has(css))) continue;       // driven as part of its form
+    if (FIELD.has(it.role) && !TOGGLE.has(it.role)) continue;                   // loose text input: not a standalone action
     interactive.push({
       role: it.role, name: it.name, tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || undefined,
       href: el.tagName === 'A' ? el.href : undefined, css, nth: it.nth,
-      disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true', groupId: g ? g.id : -1, target: el.getAttribute('target') || undefined, inModal: !!el.closest('[role=dialog], dialog[open]'),
+      disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true', groupId: grouped ? g.id : -1, target: el.getAttribute('target') || undefined,
+      inModal: !!el.closest('[role=dialog], dialog[open]'),
     });
   }
 

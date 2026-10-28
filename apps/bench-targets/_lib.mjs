@@ -26,7 +26,7 @@ export function createApp({ name, seed, handler }) {
     }
     const ctype = req.headers['content-type'] || '';
     const form = ctype.includes('x-www-form-urlencoded') ? Object.fromEntries(new URLSearchParams(body)) : {};
-    const json = ctype.includes('json') && body ? JSON.parse(body) : {};
+    let json = {}; try { json = ctype.includes('json') && body ? JSON.parse(body) : {}; } catch { json = {}; }
 
     const send = (status, content, type = 'text/html; charset=utf-8', extra = {}) => {
       res.writeHead(status, { 'Content-Type': type, ...headers, ...extra });
