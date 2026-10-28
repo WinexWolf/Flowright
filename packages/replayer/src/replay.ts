@@ -59,6 +59,20 @@ export async function measureReplay(browser: Browser, baseUrl: string, cfg: Targ
   return { flows: flows.length, runs, passed, successRate: runs ? passed / runs : 1, flaky, failing };
 }
 
+const routePath = (r: ReplayResult) => (r.evidence?.route ?? '').split('?')[0].replace(/\d+/g, 'N');
+
+/**
+ * Did a probe (blank/invalid input) end the same way valid input did? MUST use the same notion of "same" as the oracle's detection rule,
+ * otherwise a finding can be raised and then rejected at confirmation. Exact structural equality is too brittle (an accepted blank item
+ * adds a zero-width row), so: same structure, OR same route shape with no alert and no dialog on either side.
+ */
+export function sameProbeOutcome(a: ReplayResult, b: ReplayResult): boolean {
+  if (!a.ok || !b.ok || routePath(a) !== routePath(b)) return false;
+  if (a.treeHash === b.treeHash && a.overlay === b.overlay) return true;
+  const ea = a.evidence, eb = b.evidence; if (!ea || !eb) return false;
+  return !ea.alerts.length && !eb.alerts.length && !ea.dialogs.length && !eb.dialogs.length;
+}
+
 export interface Confirmation { reproduced: number; attempts: number; confirmed: boolean }
 
 /** Re-run a finding's reproduction path in fresh contexts. Confirmed only if the SAME symptom shows up in at least `need` of `k` attempts. */
@@ -78,7 +92,7 @@ async function reproducesOnce(browser: Browser, baseUrl: string, cfg: TargetConf
     const base = f.path.slice(0, -1);
     const a = await replayPath(browser, baseUrl, cfg, cfg.startPath, [...base, f.probe.valid]);
     const b = await replayPath(browser, baseUrl, cfg, cfg.startPath, [...base, f.probe.variant]);
-    return a.ok && b.ok && a.treeHash === b.treeHash && a.overlay === b.overlay && a.evidence?.route.split('?')[0] === b.evidence?.route.split('?')[0];
+    return sameProbeOutcome(a, b);
   }
   const r = await replayPath(browser, baseUrl, cfg, cfg.startPath, f.path);
   if (!r.ok) return false;
