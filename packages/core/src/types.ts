@@ -38,6 +38,7 @@ export interface TargetConfig {
   sandbox: boolean;                       // sandbox=true allows destructive-looking actions except blockedActionPatterns
   blockedActionPatterns?: string[];       // regex sources, case-insensitive
   allowedHosts?: string[];                // extra hosts besides the base host
+  fieldValues?: Record<string, string>;   // EXACT field-name -> value (e.g. suggested by an LLM); beats formValues' substring matching
   formValues?: Record<string, string>;    // overrides keyed by field name / type / label substring
   staticSegments?: string[];              // URL path segments that must never be generalised to a param
   urlOverrides?: { pattern: string; template: string }[];
@@ -85,7 +86,18 @@ export interface CrawlGraph { states: StateNode[]; edges: Edge[]; cycles: string
 export interface Flow {
   id: string; name: string; startPath: string; steps: Action[];
   expect: { route: string; treeHash: string; overlay: string; heading?: string };
+  intent?: FlowIntent;                     // optional, proposed by a model, VERIFIED by deterministic checks
 }
+
+/** What a flow is for, and what must be true when it ends. Models may PROPOSE these; only the deterministic checker decides pass/fail. */
+export type Assertion =
+  | { kind: 'url-matches'; pattern: string }
+  | { kind: 'heading'; text: string }
+  | { kind: 'text-visible'; text: string }
+  | { kind: 'alert-contains'; text: string }
+  | { kind: 'dialog-contains'; text: string }
+  | { kind: 'no-alert' };
+export interface FlowIntent { name: string; intent: string; assertions: Assertion[] }
 
 export type FindingKind = 'console-error' | 'failed-request' | 'broken-link' | 'dead-click' | 'overflow' | 'broken-image' | 'empty-route' | 'missing-validation';
 export interface OracleFinding {

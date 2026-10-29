@@ -10,6 +10,7 @@ export function valueFor(f: FieldSpec, variant: Variant, cfg: TargetConfig): str
     if (t === 'number') return '-1';
     return 'x';
   }
+  if (cfg.fieldValues && Object.prototype.hasOwnProperty.call(cfg.fieldValues, f.name)) return cfg.fieldValues[f.name];   // exact name wins
   const hay = `${f.name} ${f.label}`.toLowerCase();
   for (const [k, v] of Object.entries(cfg.formValues ?? {})) {
     if (f.name.toLowerCase() === k.toLowerCase() || t === k || hay.includes(k.toLowerCase())) return v;
