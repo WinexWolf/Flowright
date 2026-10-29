@@ -1,0 +1,31 @@
+# Example CI job: run Flowright against the app on every pull request, verifying only what the diff could affect.
+# Copy to .github/workflows/flowright.yml in YOUR app's repository and adjust the start command and URL.
+name: flowright
+on: { pull_request: {} }
+jobs:
+  flows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }                      # needed so the diff against the base branch is available
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Start the app against a SEEDED, disposable database (never production)
+        run: |
+          npm run build && (npm start &)
+          npx wait-on http://localhost:3000
+      - name: Check flows affected by this PR
+        run: |
+          git clone --depth 1 https://github.com/YOUR-ORG/flowright.git /tmp/flowright && cd /tmp/flowright && npm ci
+          npx tsx packages/cli/src/index.ts analyze http://localhost:3000 \
+            --config $GITHUB_WORKSPACE/flowright.target.json \
+            --diff origin/${{ github.base_ref }} --out $GITHUB_WORKSPACE/flowright-report --fail-on error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: flowright-report, path: flowright-report }        # report.html, videos, traces, repro specs, junit.xml
+      - uses: mikepenz/action-junit-report@v4
+        if: always()
+        with: { report_paths: flowright-report/junit.xml }

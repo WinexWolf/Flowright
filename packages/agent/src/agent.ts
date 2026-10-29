@@ -3,6 +3,7 @@ import { fingerprint, UrlTemplater, type Action, type Assertion, type Evidence, 
 import { openSession, perform, snapshot } from '@flowright/driver';
 import { candidateActions } from '@flowright/explorer';
 import { checkAssertions } from '@flowright/oracle';
+import { replayPath } from '@flowright/replayer';
 import type { Policy } from './policy.js';
 
 export interface Goal { text: string; success: Assertion[] }
@@ -56,4 +57,26 @@ export async function runAgent(browser: Browser, baseUrl: string, cfg: TargetCon
     const last = await snapshot(s.page);
     return finish({ stopReason: 'step-budget', finalEvidence: last.evidence, failedAssertions: checkAssertions(goal.success, last.evidence).filter(r => !r.ok).map(r => r.why) });
   } finally { await s.ctx.close().catch(() => {}); }
+}
+
+/**
+ * An agent wanders: it may open Contact and fill a form on its way to checkout. A flow should be the SHORTEST path that still reaches the goal.
+ * Greedy minimization: try dropping each step; keep the drop only if a real replay from a fresh browser still satisfies every success assertion.
+ * Every removal is verified, so the result can never be a path that does not work.
+ */
+export async function minimizeFlow(browser: Browser, baseUrl: string, cfg: TargetConfig, flow: Flow, success: Assertion[], opts: { maxReplays?: number } = {}): Promise<{ flow: Flow; removed: number; replays: number }> {
+  let steps = [...flow.steps]; let replays = 0; let last: Awaited<ReturnType<typeof replayPath>> | null = null;
+  const cap = opts.maxReplays ?? 80;
+  // Repeat until a full pass removes nothing: a step that was needed while its dependent step existed (a contact link before a contact form)
+  // becomes removable once that dependent is gone, which a single forward pass would never notice. Result: no single step can be dropped (1-minimal).
+  for (let changed = true; changed && replays < cap;) {
+    changed = false;
+    for (let i = 0; i < steps.length && replays < cap;) {
+      const trial = steps.filter((_, j) => j !== i);
+      const r = await replayPath(browser, baseUrl, cfg, flow.startPath, trial); replays++;
+      if (r.ok && r.evidence && checkAssertions(success, r.evidence).every(a => a.ok)) { steps = trial; last = r; changed = true; } else i++;
+    }
+  }
+  if (!last) return { flow, removed: 0, replays };
+  return { flow: { ...flow, steps, expect: { ...flow.expect, treeHash: last.treeHash ?? flow.expect.treeHash, overlay: last.overlay ?? flow.expect.overlay } }, removed: flow.steps.length - steps.length, replays };
 }

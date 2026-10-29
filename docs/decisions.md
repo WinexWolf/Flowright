@@ -110,3 +110,65 @@ read in full, tested, and re-evaluated. Two integrity issues were found and fixe
    as `matchOriginal` on the two bugs whose rules were widened after dev results were seen (`shop-layout-overflow`, `tasks-failing-api`), and recall is reported under both rule sets.
 2. `errata.json` excused a finding (`tasks-edit-title-unvalidated`) as a "real defect in the clean app". It *was* real (the edit endpoint accepted blank titles), so the app was fixed
    instead of the finding being excused. The errata entry stays for history and no longer matches anything.
+
+
+---
+
+## M2 final results (current code, isolated bug injection: one bug per crawl)
+
+| App | Bugs | Recall | Under the original strict match rules | False positives | Replay success |
+|---|---|---|---|---|---|
+| shop | dev | 5/5 | 5/5 | 0 (clean and bug-injected) | 100% of 150 runs (15 flows) |
+| tasks | dev | 4/4 | 4/4 | 0 (clean and bug-injected) | 100% of 140 runs (14 flows) |
+| shop | held-out | 1/1 | 1/1 | 1 (see below) | 100% of 150 runs |
+| tasks | held-out | 2/2 | 2/2 | 0 | 100% of 140 runs |
+
+- Held-out was run once; nothing was tuned on it. The one counted false positive is the app's own `console.error: stock lookup failed` on the held-out failing-API bug:
+  a second symptom of the same injected bug, counted because that bug's rule lists only `failed-request`. The rule was not widened.
+- Generated Playwright specs (tasks app): all 4 flow specs pass on buggy and clean apps; all 6 finding repros fail on the buggy app and pass on the clean one.
+- Not evaluated: the library app's 6 bugs. 10 replay runs per flow were used, not 20.
+- Combined bug runs mask each other (a dead "Add to cart" makes the checkout validation bug unreachable). Hence one bug per crawl.
+
+## Defects found by running M2's generated artifacts (and fixed)
+
+| Defect | Effect | Fix |
+|---|---|---|
+| The `empty` form probe left prefilled fields untouched | an edit form's "empty" submit sent the existing valid value: a spurious finding, and a repro that failed on the clean app | the probe now clears the field (driver and generated specs) |
+| Replayer confirmation used exact structural equality while the oracle used a looser rule | a valid finding was detected, then wrongly rejected (tasks recall 3/4) | one shared rule, `sameProbeOutcome`, with regression tests |
+| Console-error repros asserted only on uncaught exceptions | could never fail | they now capture `console.error` |
+| Dead-click repros compared `innerHTML` length | a working button looked dead when text changed to same-length text | compare whole page and URL |
+| Playwright ran with no config, finding no specs | the spec check silently reported "0 unexpected" | explicit `playwright.config.ts`; the check now fails loudly on an empty result |
+
+## M3 to M6: design decisions
+
+**D10. A model proposes, deterministic code decides.** Assertions proposed by a model are kept only if they hold on the page evidence they were derived from
+(`labelFlows` drops the rest and counts them). Narration rewrites must keep every quoted control name or the original line is used. An agent's chosen action index is
+range-checked. Goal success is an assertion on the real page. A model cannot make a flow pass or fail.
+
+**D11. One door to models.** `llm-provider` imports nothing of ours and is the only route to a model. It retries once on invalid JSON (feeding the error back),
+once on 429/5xx, never on 4xx; logs every call to JSONL; enforces call and cost budgets; reports cost 0 unless prices are supplied. Provider tests use a faked network.
+
+**D12. Agent flows are minimized.** An agent wanders (the heuristic took 13 steps for a 4-step checkout). `minimizeFlow` drops any step whose removal still satisfies every success
+assertion on a real fresh-browser replay, repeating until no single step can go. A single forward pass left a redundant `Contact -> Home` pair (it got 13 to 6); repeating gets to the true minimum of 4.
+
+**D13. Reports show how each page was first reached, not every click.** Drawing all transitions (every page links to every page) produced an unreadable tangle, and marking every
+erroring click turned the map red. The map is the first-reach tree, colored by whether that click raised an error.
+
+**D14. PR-diff selection is conservative.** File-based routers (Next pages and app, SvelteKit, Remix flat routes, Nuxt) map files to routes. A change to anything that can affect many pages
+(components, styles, layouts, API routes, lockfiles) runs everything; docs/tests/images are ignored. A route folder named `docs` is a route (a bug found by test: it was once skipped as documentation).
+Findings outside the changed area are counted but not verified.
+
+**D15. Demo timing is narration-first.** Caption (or audio) durations are fixed first; actions are paced to them. Zoom is clamped so it never crops the page's own edges; it is skipped on a scrolled page.
+Audio is a `TtsProvider` interface; only a silent stand-in exists, so there is no real voice.
+
+## Verification status
+
+| Claim | Evidence |
+|---|---|
+| Crawler, oracle, replay on benchmark apps | measured results above |
+| Pipeline finds, confirms and documents bugs; clean app is clean; diff mode skips unrelated findings | `packages/engine/test/pipeline.e2e.test.ts` on a real app |
+| CLI commands, exit codes, safety refusals | each command executed once for real (analyze exit 1 on an injected bug; agent 0/1; non-local and missing-key refusals exit 2) |
+| Report and demo look right | rendered, screenshotted and inspected (route map, zoom, phone bezel, typed form values) |
+| Demo audio muxing | ffprobe confirms an audio stream with a silent stand-in voice; **not** a real voice |
+| LLM paths | scripted stand-in and faked network only; **never run against the live API** |
+| GitHub workflow | **not run** |

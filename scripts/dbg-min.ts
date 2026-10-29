@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+import { startApp } from '../packages/benchmark/src/servers.ts';
+import { TARGETS } from '../packages/benchmark/src/targets.ts';
+import { HeuristicPolicy, minimizeFlow, runAgent } from '../packages/agent/src/index.ts';
+const shop = await startApp('shop'); const b = await chromium.launch(); const cfg = TARGETS.shop;
+const goal = { text: 'add a product to the cart, proceed to checkout and place the order', success: [{ kind: 'heading' as const, text: 'Order confirmed' }] };
+const r = await runAgent(b, shop.baseUrl, cfg, goal, new HeuristicPolicy(), { maxSteps: 14 });
+const m = await minimizeFlow(b, shop.baseUrl, cfg, r.flow!, goal.success);
+console.log('ORIGINAL', r.flow!.steps.length, '-> MINIMIZED', m.flow.steps.length, 'replays', m.replays);
+m.flow.steps.forEach((s, i) => console.log(' ', i + 1, s.label));
+await b.close(); await shop.stop();

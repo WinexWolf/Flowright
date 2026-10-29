@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import { chromium } from 'playwright';
+import { startApp } from '../packages/benchmark/src/servers.ts';
+import { TARGETS } from '../packages/benchmark/src/targets.ts';
+import { HeuristicPolicy, runAgent } from '../packages/agent/src/index.ts';
+import { renderDemo, SilentTts, extractFrames, probe } from '../packages/demo/src/index.ts';
+
+const app = await startApp('shop'); const browser = await chromium.launch(); const cfg = TARGETS.shop;
+const r = await runAgent(browser, app.baseUrl, cfg, { text: 'add a product to the cart, proceed to checkout and place the order', success: [{ kind: 'heading', text: 'Order confirmed' }] }, new HeuristicPolicy(), { maxSteps: 14 });
+console.log('agent:', r.stopReason, r.path.map(a => a.label).join(' > '));
+const flow = { ...r.flow!, intent: { name: 'Place an order', intent: 'Buy a product', assertions: r.flow!.intent!.assertions } };
+fs.writeFileSync('reports/demo-flow.json', JSON.stringify(flow, null, 2));
+const t0 = Date.now();
+const d = await renderDemo(browser, app.baseUrl, cfg, flow, { outDir: 'reports/demo-desktop', device: 'desktop', log: console.log });
+console.log('desktop demo', ((Date.now() - t0) / 1000).toFixed(0) + 's', d.mp4, 'cues', d.cues.length, JSON.stringify(await probe(d.mp4!)));
+const dur = (await probe(d.mp4!)).durationSec;
+console.log('frames', await extractFrames(d.mp4!, [1.2, dur * 0.3, dur * 0.55, dur * 0.8, dur - 1.5], 'reports/demo-desktop/frames'));
+const p = await renderDemo(browser, app.baseUrl, cfg, flow, { outDir: 'reports/demo-phone', device: 'phone', tts: new SilentTts(), log: console.log });
+console.log('phone demo', p.mp4, 'audio', p.hasAudio, JSON.stringify(await probe(p.mp4!)));
+const pd = (await probe(p.mp4!)).durationSec;
+console.log('frames', await extractFrames(p.mp4!, [1.5, pd * 0.4, pd * 0.7], 'reports/demo-phone/frames'));
+await browser.close(); await app.stop();

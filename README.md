@@ -1,61 +1,109 @@
 # Flowright
 
-Autonomous testing of web-app front-end flows: explore an app like a user would, find broken behaviour with deterministic
-browser signals, and compile every discovered flow into a replayable artifact. (A later milestone renders those same flows into product demos.)
+Test your web app's front-end flows without clicking through them yourself. Flowright explores the app like a user, finds broken behaviour
+using deterministic browser signals, **confirms every problem by replaying it from a fresh browser**, and turns each discovered flow into a
+replayable artifact. The same flows can be recorded as narrated product demos.
 
-## Status: 7 milestones (M0-M6)
+```bash
+npm install && npx playwright install chromium
+npx tsx packages/cli/src/index.ts analyze http://localhost:3000 --config target.json --out reports/myapp
+open reports/myapp/report.html
+```
 
-| | Milestone | State |
-|---|---|---|
-| M0 | Benchmark: 3 target apps, hand-labeled flows, 18 injected bugs, baselines | done |
-| M1 | Deterministic crawler, state graph, two-level fingerprint | done (+ audit, see docs/decisions.md) |
-| M2 | Oracle, flow compiler, replayer, bug-recall + replay evaluation | done (see docs/decisions.md for measured numbers and caveats) |
-| M3 | LLM form-filling, flow naming/clustering, intent assertions | not started |
-| M4 | Goal-directed agent for flows the crawler cannot reach | not started |
-| M5 | CLI polish, CI action, PR-diff-aware runs, traces/video per failure | not started |
-| M6 | Demo layer: narration, DOM-coordinate zooms, cursor smoothing, device frames | not started |
+You get: `report.html` (verdict, route map, each problem with screenshot, video, Playwright trace and a runnable repro test), `junit.xml`,
+`findings.json`, `flows.json`, `graph.json`. A repro test fails while the bug exists and passes once it is fixed.
+
+## Status: 7 milestones (M0 to M6), all built
+
+| | Milestone | What exists | How it was verified |
+|---|---|---|---|
+| M0 | Benchmark | 3 target apps, hand-labeled flows, 18 injected bugs, random-click baseline | coverage runs, committed before any explorer |
+| M1 | Crawler | state graph, two-level fingerprint, URL templates, replay, safety rules | 3 apps at 100% of labeled states and flows; 14-defect audit (docs/decisions.md) |
+| M2 | Oracle, compiler, replayer | findings, replay confirmation, Playwright spec + repro generation | isolated bug injection: dev 9/9, held-out 3/3, 0 false positives on clean apps; generated specs run and behave correctly |
+| M3 | LLM layer | provider (Anthropic over fetch), call log + budgets, grounded assertions, flow naming, form values | unit tests against a **scripted stand-in**; **never run against the live API** |
+| M4 | Goal agent | one-goal exploration (offline heuristic or LLM policy), flow minimization | real-browser tests with the heuristic policy; LLM policy tested with scripted replies only |
+| M5 | CI and reports | pipeline, HTML report, video/trace/screenshot per failure, JUnit, PR-diff selection, CLI, example workflow | pipeline end-to-end test, diff logic on a real git repo, CLI commands executed; **the GitHub workflow has not been run** |
+| M6 | Demo layer | narrated recording with cursor, ripple, captions, zoom; desktop and phone; mp4 + captions | rendered and inspected frame by frame; ffprobe checks; **no real text-to-speech engine, captions only** |
+
+Numbers and caveats are in `docs/decisions.md`. Short version: the apps are small and written by the tool's author, so passing them shows the
+mechanics work, not that Flowright generalizes. Run it on your own app before trusting it.
+
+## Commands
+
+| | |
+|---|---|
+| `analyze <url>` | crawl, find problems, confirm by replay, record evidence, write the report. `--diff GITREF` or `--changed a.tsx,b.tsx` verifies only what a change could affect. Exit code 1 if a confirmed problem is found (`--fail-on error|suspect|none`). |
+| `agent <url> --goal "..." --success-heading "..."` | pursue one goal and compile the shortest path that reaches it (`agent-flow.json`). Success is decided by checks on the real page. |
+| `demo <url> --goal ... --success-heading ...` | record that flow as a narrated demo (`--device phone`, `--no-zoom`). Or `--flows flows.json --flow s5` to record a flow found by `analyze`. |
+| `report <dir>` | re-render `report.html` from a previous run without recrawling |
+| `diff --base GITREF` | show which routes a change affects |
+| `crawl <url> [--dry-run]` | crawl only; `--dry-run` lists what would be clicked and clicks nothing |
+
+Add `--llm` (needs `ANTHROPIC_API_KEY`) for model-chosen actions, model-named flows, and polished narration; `--llm-forms` for model-suggested form values.
+**Nothing requires a key**: every measured result in this repo was produced without a model.
+
+## Target config (`target.json`)
+
+```json
+{ "name": "myapp", "startPath": "/", "sandbox": true,
+  "blockedActionPatterns": ["log ?out|sign ?out"],
+  "formValues": { "email": "demo@example.com", "password": "password123" },
+  "fieldValues": { "q": "laptops" },
+  "staticSegments": ["profile", "billing"], "viewport": { "width": 1280, "height": 720 } }
+```
+`sandbox: true` allows destructive-looking actions (delete, place order) except the patterns you block; leave it `false` for anything you care about.
+`formValues` match by substring (name, type, label); `fieldValues` match a field's exact name and win over `formValues`.
+
+## Safety model
+
+The explorer clicks everything. So: other hosts are blocked at the network layer; a destructive-action blocklist (by control name **and** link target)
+applies in full to any target not declared `sandbox: true`; `confirm()` dialogs are dismissed on non-sandbox targets; non-local hosts need
+`--allow-nonlocal`; models can only choose among actions the driver offers. **Run it against a local or ephemeral copy with seeded data, never production.**
+Each fresh browser context must see a fresh app state (the replay model depends on it); for a real app that means a resettable seeded database.
+
+## Models propose, deterministic code decides
+
+A model may propose form values, flow names, assertions, narration wording, and which action to try next. Each proposal is validated first:
+assertions must be true on the page they were derived from; narration must keep every control name; an agent's chosen action must exist;
+success of a goal is an assertion on the real page; pass/fail of a flow is replay. Every call is logged to `llm-calls.jsonl` and capped (default 200).
+Cost is reported as $0 unless you supply token prices; none are invented.
 
 ## Packages
 
 | package | role | may import |
 |---|---|---|
-| `core` | shared types, URL templater, state fingerprint | nothing from flowright |
+| `core` | types, URL templater, state fingerprint | nothing |
 | `driver` | browser session, in-page extractor, settle logic, action performer | core |
-| `explorer` | crawler (state graph), blocklist, graph visualisation | core, driver |
-| `oracle` | pure rules over a crawl graph -> findings (no browser, no AI) | core |
-| `flow-compiler` | graph path -> replayable Flow; Playwright spec + finding repro generation | core, driver |
-| `replayer` | deterministic replay, replay-rate measurement, finding confirmation | core, driver |
-| `benchmark` | target apps' labels, baselines, coverage + oracle evaluation | everything |
-| `cli` | `flowright crawl` | explorer |
+| `explorer` | crawler, safe candidate actions, blocklist, graph view | core, driver |
+| `oracle` | pure rules over a crawl graph, assertion checker | core |
+| `flow-compiler` | graph path to flow; Playwright spec and repro generation | core, driver |
+| `replayer` | deterministic replay, confirmation, video/trace/screenshot capture | core, driver, oracle |
+| `llm-provider` | the only route to a model; logging, budgets | nothing |
+| `semantic` | model-proposed names, assertions, form values (all validated) | core, oracle, llm-provider |
+| `agent` | goal-directed exploration and flow minimization | core, driver, explorer, oracle, replayer, llm-provider |
+| `report` | self-contained HTML report | nothing |
+| `demo` | narration, overlay, recording, ffmpeg encoding | core, driver, llm-provider |
+| `engine` | the analyze pipeline, PR-diff selection, JUnit | everything above |
+| `benchmark`, `cli` | evaluation harness; command line | everything |
 
-`oracle` and `replayer` must never import `llm-provider` or `agent` (enforced by `npm run lint:boundaries`).
+Enforced by `npm run lint:boundaries`. Nothing on the ground-truth path (oracle, replayer, driver, flow-compiler, core) can import a model.
 
-## Commands
+## Tests
 
 ```bash
-npm install
-npm test                                    # unit tests (fast, ~3s)
-npm run lint:boundaries
-npx tsc -p tsconfig.json                    # typecheck
-
-# coverage of hand-labeled flows (dev apps; add --include-heldout for the held-out app)
-npx tsx packages/benchmark/src/run.ts --explorer noop,random,crawler --apps shop,tasks --steps 600 --time 500000
-
-# oracle + replay evaluation (isolated: one injected bug per crawl)
-npx tsx packages/benchmark/src/run.ts --oracle --bugs dev --apps shop,tasks --replay-runs 10 --out reports/oracle-dev.json
-
-# crawl any LOCAL app (refuses non-local hosts without --allow-nonlocal; --dry-run lists actions without executing any)
-npx tsx packages/cli/src/index.ts crawl http://localhost:3000 --config target.json --out reports/myapp
-
-# verify that generated Playwright specs run, and that finding repros fail on the buggy app but pass on the clean one
-npx tsx scripts/verify-specs.ts tasks
+npm test               # ~18 s: unit tests plus real-browser tests (123 tests)
+npm run test:e2e       # ~5 min: full pipeline, minimization, demo rendering on real apps
+npm run lint:boundaries && npx tsc -p tsconfig.json
+npx tsx scripts/verify-specs.ts tasks        # do generated repro specs fail on the buggy app and pass on the clean one?
+npx tsx scripts/showcase.ts                  # regenerate the sample report and demos in reports/showcase
 ```
+Needs `ffmpeg` for demos. Timings are from a single-CPU sandbox.
 
-Single-CPU sandbox timings are in docs/decisions.md; a full oracle evaluation takes tens of minutes.
+## Known limits
 
-## Safety model
-
-The explorer clicks everything, so: same-host containment (other hosts are aborted at the network layer), a destructive-action blocklist
-(name AND link target) applied in full to any target not declared `sandbox: true`, `confirm()` dialogs are dismissed on non-sandbox targets,
-non-local hosts need `--allow-nonlocal`, and `--dry-run` lists what would be done. Run it against a local/ephemeral copy with seeded data,
-never production.
+- Small, self-written benchmark apps; real apps will expose gaps (auth/MFA, iframes, shadow DOM, canvas UIs, infinite scroll are unsupported or untested).
+- The crawler is thorough, not fast: a 12-page app takes about 3 minutes. Crawls of bug-injected apps are slower.
+- Combined bugs can mask each other (a dead "Add to cart" makes checkout unreachable, hiding checkout bugs); evaluation therefore injects one bug at a time.
+- Form probing uses generic values; it cannot reach states that need meaningful input (a search that must return results) unless you supply `fieldValues` or use `--llm-forms`.
+- Demo zoom is a CSS transform on `<body>`, so a modal that opens during a zoom can sit slightly off for under half a second. Phone mode is viewport and touch emulation with a drawn bezel, not a real device. There is no real voice: the TTS interface exists and is tested with a silent stand-in only.
+- `ci/flowright.yml` is an example that has not been run on GitHub Actions.

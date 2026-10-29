@@ -10,7 +10,9 @@
     "test": "vitest run",
     "bench": "tsx packages/benchmark/src/run.ts",
     "crawl": "tsx packages/cli/src/index.ts crawl",
-    "lint:boundaries": "tsx scripts/check-boundaries.ts"
+    "lint:boundaries": "tsx scripts/check-boundaries.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "flowright": "tsx packages/cli/src/index.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
