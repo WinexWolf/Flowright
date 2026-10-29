@@ -106,4 +106,5 @@ Needs `ffmpeg` for demos. Timings are from a single-CPU sandbox.
 - Combined bugs can mask each other (a dead "Add to cart" makes checkout unreachable, hiding checkout bugs); evaluation therefore injects one bug at a time.
 - Form probing uses generic values; it cannot reach states that need meaningful input (a search that must return results) unless you supply `fieldValues` or use `--llm-forms`.
 - Demo zoom is a CSS transform on `<body>`, so a modal that opens during a zoom can sit slightly off for under half a second. Phone mode is viewport and touch emulation with a drawn bezel, not a real device. There is no real voice: the TTS interface exists and is tested with a silent stand-in only.
+- The click-through UI prototype is in `prototype/index.html`; `npx tsx scripts/audit-prototype.ts` re-runs its accessibility audit (axe-core WCAG 2.2 AA on every screen in three themes, plus keyboard, focus, reflow and target-size checks).
 - `ci/flowright.yml` is an example that has not been run on GitHub Actions.
