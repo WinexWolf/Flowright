@@ -21,7 +21,7 @@ function stepCode(a: Action, cfg: TargetConfig, i: number): string[] {
       if (f.type === 'select') { if (a.variant !== 'empty') out.push(`  await page.locator(${q(f.css)}).first().selectOption({ index: 0 });`); continue; }
       if (f.type === 'checkbox' || f.type === 'radio') { if (a.variant === 'valid') out.push(`  await page.locator(${q(f.css)}).first().check();`); continue; }
       const v = valueFor(f, a.variant, cfg);
-      if (v !== null) out.push(`  await page.locator(${q(f.css)}).first().fill(${q(v)});`);
+      out.push(`  await page.locator(${q(f.css)}).first().fill(${q(v ?? '')});`);   // null = blank: clear any prefilled value
     }
     out.push(a.submit ? `  await ${locatorCode(a.submit)}.click();` : `  await page.keyboard.press('Enter');`);
   }
@@ -37,8 +37,9 @@ const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:3000';
 const settle = async (page: Page) => { await page.waitForLoadState('domcontentloaded'); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(250); };
 
 test(${q(name)}, async ({ page }) => {
-  const pageErrors: string[] = []; const badResponses: string[] = [];
+  const pageErrors: string[] = []; const badResponses: string[] = []; const consoleErrors: string[] = [];
   page.on('pageerror', e => pageErrors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('response', r => { if (r.status() >= 400 && ['document', 'xhr', 'fetch'].includes(r.request().resourceType())) badResponses.push(\`\${r.status()} \${r.request().resourceType()} \${r.url()}\`); });
   page.on('dialog', d => d.accept());
   await page.goto(BASE + ${q(startPath)});
@@ -56,19 +57,20 @@ export function flowSpec(flow: Flow, cfg: TargetConfig): string {
 export function findingSpec(f: OracleFinding, cfg: TargetConfig): string {
   const body = f.path.flatMap((a, i) => stepCode(a, cfg, i));
   const assertion: Record<string, string[]> = {
-    'console-error': [`  expect(pageErrors, 'no uncaught exceptions expected').toEqual([]);`],
+    'console-error': [`  expect([...pageErrors, ...consoleErrors.filter(t => !/Failed to load resource/.test(t))], 'no console errors or uncaught exceptions expected').toEqual([]);`],
+    'page-error': [`  expect(pageErrors, 'no uncaught exceptions expected').toEqual([]);`],
     'failed-request': [`  expect(badResponses.filter(r => !r.startsWith('4')), 'no 5xx responses expected').toEqual([]);`],
     'broken-link': [`  expect(badResponses.filter(r => r.startsWith('404 document')), 'link should not lead to a 404').toEqual([]);`],
     'overflow': [`  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'page should not scroll horizontally').toBe(true);`],
     'broken-image': [`  expect(await page.evaluate(() => Array.from(document.images).filter(i => i.complete && i.naturalWidth === 0).length)).toBe(0);`],
     'empty-route': [`  expect((await page.locator('main').innerText()).trim().length, 'route should render content').toBeGreaterThan(0);`],
     'missing-validation': [`  await expect(page.getByRole('alert').first(), 'invalid input should show validation feedback').toBeVisible();`],
-    'dead-click': [`  expect(await page.evaluate(() => document.body.innerHTML.length), 'click should change the page').not.toBe(beforeLen);`],
+    'dead-click': [`  expect({ html: await page.evaluate(() => document.body.innerHTML), url: page.url() }, 'click should change the page').not.toEqual(before);`],
   };
   let code = PRELUDE(`repro: ${f.kind} at ${f.route}`, cfg.startPath);
   if (f.kind === 'dead-click') {
     const pre = f.path.slice(0, -1).flatMap((a, i) => stepCode(a, cfg, i));
-    code += [...pre, `  const beforeLen = await page.evaluate(() => document.body.innerHTML.length);`, ...stepCode(f.path[f.path.length - 1], cfg, f.path.length - 1)].join('\n');
+    code += [...pre, `  const before = { html: await page.evaluate(() => document.body.innerHTML), url: page.url() };   // whole page + URL, not just its length`, ...stepCode(f.path[f.path.length - 1], cfg, f.path.length - 1)].join('\n');
   } else code += body.join('\n');
   return code + '\n' + (assertion[f.kind] ?? []).join('\n') + '\n});\n';
 }

@@ -50,7 +50,8 @@ export async function perform(page: Page, settle: () => Promise<unknown>, cfg: T
         if (f.type === 'select') { if (a.variant !== 'empty' && f.options?.length) await loc.selectOption({ index: 0 }, { timeout: 1500 }); continue; }
         if (f.type === 'checkbox' || f.type === 'radio') { if (a.variant === 'valid') await loc.check({ timeout: 1500 }).catch(() => {}); continue; }
         const v = valueFor(f, a.variant, cfg);
-        if (v !== null) await loc.fill(v, { timeout: 1500 });
+        // 'empty' means BLANK, not 'untouched': a prefilled field (an edit form) must be cleared, or the probe submits the existing valid value
+        await loc.fill(v ?? '', { timeout: 1500 });
       }
       if (a.submit) {
         const btn = await locate(page, a.submit);

@@ -1,0 +1,10 @@
+import { startApp } from '../packages/benchmark/src/servers.ts';
+import { TARGETS } from '../packages/benchmark/src/targets.ts';
+import { crawl } from '../packages/explorer/src/crawler.ts';
+import { analyze } from '../packages/oracle/src/index.ts';
+const app = process.argv[2] ?? 'tasks'; const r = await startApp(app, []);
+const res = await crawl(r.baseUrl, TARGETS[app], { maxSteps: 600, maxTimeMs: 600000 });
+await r.stop();
+const f = analyze(res.graph);
+console.log('CLEAN', app, 'states', res.graph.states.length, 'findings', f.length);
+for (const x of f) console.log(' ', x.kind, x.route, '|', x.detail.slice(0, 90), '| path:', x.path.map(a => a.label).join(' > ').slice(0, 160));
