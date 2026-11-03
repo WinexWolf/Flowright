@@ -2,7 +2,7 @@
 import fs from 'node:fs'; import path from 'node:path';
 import { chromium, type Page, type Browser } from 'playwright';
 const FILE = 'file://' + path.resolve('prototype2/index.html'); const AXE = fs.readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
-const ROUTES = ['#home', '#new', '#results', '#finding-F1', '#flows', '#flow-checkout', '#demos', '#prefs'];
+const ROUTES = ['#home', '#ask', '#new', '#results', '#finding-F1', '#flows', '#flow-checkout', '#demos', '#prefs'];
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice']; const out: string[] = []; let failures = 0, passes = 0;
 const log = (s: string) => { console.log(s); out.push(s); }; const fail = (s: string) => { failures++; log('  FAIL ' + s); };
 async function open(b: Browser, o: { theme?: string; size?: number; w?: number; h?: number; motion?: 'reduce' | 'no-preference'; scheme?: 'light' | 'dark'; seen?: boolean } = {}) {
@@ -31,6 +31,10 @@ for (const theme of ['light', 'dark', 'contrast']) {
   for (let i = 1; i < 6; i++) { await p.click('#tab' + i); await p.waitForTimeout(250); await axe(p, `${theme} tour tab ${i + 1}`); }
   await go(p, '#new'); await p.fill('#url', 'example.com'); await p.check('input[value=goal]'); await p.click('button[type=submit]'); await p.waitForTimeout(150); await axe(p, `${theme} form error state`);
   await go(p, '#finding-F1'); await p.click('[data-act=dismiss]'); await p.waitForSelector('dialog[open]'); await axe(p, `${theme} dismiss dialog`); await p.keyboard.press('Escape');
+  await go(p, '#ask'); await p.click('[data-ex="0"]'); await p.click('[data-act=askrun]'); await p.waitForSelector('#ask-done'); await axe(p, `${theme} ask: reached`);
+  await p.click('[data-ex="3"]'); await p.click('[data-act=askrun]'); await p.waitForSelector('#ask-done:has-text("Couldn")'); await axe(p, `${theme} ask: could not reach`);
+  await go(p, '#flows'); await p.click('[data-act=ainame]'); await p.waitForSelector('#ainame-done'); await axe(p, `${theme} AI naming table`);
+  await go(p, '#home'); await p.click('#addbreak'); await p.waitForSelector('dialog[open]'); await axe(p, `${theme} add-your-own dialog`); await p.keyboard.press('Escape');
   await go(p, '#demos'); await p.click('[data-seg="1"]'); await axe(p, `${theme} demo timeline step`);
   await p.context().close();
 }
@@ -89,7 +93,7 @@ for (const size of [100, 150]) { const p = await open(b, { w: 320, h: 640, size 
   for (const r of ROUTES) { await go(p, r); const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth })); if (w.sw > w.cw + 1) wide.push(`${r} (${w.sw}px)`); }
   wide.length === 0 ? log(`  ok   320 px wide at ${size}% text: no sideways page scroll on any of ${ROUTES.length} screens`) : fail(`320px/${size}% overflows: ${wide.join(', ')}`); await p.context().close(); }
 { const p = await open(b); const small: string[] = [];
-  for (const r of ['#home', '#new', '#results', '#flows', '#demos', '#prefs']) { await go(p, r);
+  for (const r of ['#home', '#ask', '#new', '#results', '#flows', '#demos', '#prefs']) { await go(p, r);
     const s = await p.evaluate(() => [...document.querySelectorAll('button,.btn,select,input:not([type=checkbox]):not([type=radio]):not([type=range]),.site nav a,.choice,.switch,.mode,.tg,.tab,.seg-btn,.sw,.row-link,.lcard')].filter(e => { const r = (e as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0 && (e as HTMLElement).offsetParent !== null; }).map(e => { const r = (e as HTMLElement).getBoundingClientRect(); return { n: (e.textContent || e.getAttribute('aria-label') || e.tagName).trim().slice(0, 28), w: Math.round(r.width), h: Math.round(r.height) }; }).filter(x => x.h < 44 || x.w < 44));
     s.forEach(x => small.push(`${r} "${x.n}" ${x.w}x${x.h}`)); }
   small.length === 0 ? log('  ok   every button, field, nav item, toggle and choice is at least 44 x 44 px') : fail('targets under 44px: ' + small.slice(0, 8).join('; ')); await p.context().close(); }
@@ -103,7 +107,7 @@ log('== 5. settings really change the page, and controls scale with text size');
   await p.check('#s-motion'); (await p.evaluate(() => document.documentElement.dataset.motion)) === 'reduce' ? log('  ok   Reduce motion applies') : fail('motion');
   await p.reload(); await p.waitForTimeout(200); (await p.evaluate(() => document.documentElement.dataset.theme)) === 'contrast' ? log('  ok   settings persist after reload') : fail('persist'); await p.context().close(); }
 for (const size of [100, 150]) { const p = await open(b, { size }); const bad: string[] = [];
-  for (const r of ['#home', '#new', '#results', '#finding-F1', '#flows', '#demos', '#prefs']) { await go(p, r);
+  for (const r of ['#home', '#ask', '#new', '#results', '#finding-F1', '#flows', '#demos', '#prefs']) { await go(p, r);
     const s = await p.evaluate(() => { const root = parseFloat(getComputedStyle(document.documentElement).fontSize); return [...document.querySelectorAll('button,.btn,input[type=text],input[type=search],select')].filter(e => (e as HTMLElement).offsetParent !== null).map(e => ({ n: (e.textContent || e.id || e.tagName).trim().slice(0, 24), f: parseFloat(getComputedStyle(e).fontSize), root })).filter(x => x.f < x.root * 0.99); });
     s.forEach(x => bad.push(`${r} "${x.n}" ${x.f}px`)); }
   bad.length === 0 ? log(`  ok   at ${size}% every control is at least the base text size`) : fail(`controls smaller than body text at ${size}%: ${bad.slice(0, 6).join('; ')}`); await p.context().close(); }

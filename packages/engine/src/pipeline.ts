@@ -172,7 +172,7 @@ export async function analyzeApp(o: PipelineOptions): Promise<PipelineResult> {
         ...(flowDelta.stopped.length ? { 'Flows that stopped replaying': flowDelta.stopped.length } : {}),
         ...(affected ? { 'Changed files': o.changedFiles!.length, 'Findings outside the changed area (not verified)': outsideChangedArea } : {}),
       },
-      llm: o.provider ? { used: labels.usedModel, calls: o.provider.totals().calls, costUsd: o.provider.totals().costUsd, rejectedAssertions: labels.rejectedAssertions } : undefined,
+      llm: o.provider ? { used: labels.usedModel, calls: o.provider.totals().calls, costUsd: o.provider.totals().costUsd, rejectedAssertions: labels.rejectedAssertions, simulated: o.provider.simulated === true } : undefined,
     };
     const reportPath = path.join(out, 'report.html'), reportInlinePath = path.join(out, 'report.inline.html');
     fs.writeFileSync(path.join(out, 'report-data.json'), JSON.stringify(reportData, null, 2));

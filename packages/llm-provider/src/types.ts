@@ -6,6 +6,8 @@ export interface LlmCallRecord { provider: string; model: string; schemaName: st
 /** The only way anything in Flowright talks to a model. Swap providers without touching callers. */
 export interface LlmProvider {
   readonly name: string;
+  /** true for the built-in stand-in: no model is called and every result must be labelled as simulated. */
+  readonly simulated?: boolean;
   /** Ask for JSON and VALIDATE it. `validate` must throw on malformed data; the provider retries once with the error fed back. */
   generateJson<T>(req: LlmRequest, validate: (raw: unknown) => T): Promise<LlmResponse<T>>;
   readonly calls: LlmCallRecord[];

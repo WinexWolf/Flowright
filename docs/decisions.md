@@ -212,3 +212,10 @@ journeys detected and replayed, exported Playwright suite **executed and passed*
 - Visual stability was shown for one machine and one browser build; fonts or GPU differences between a laptop and CI can cause diffs: keep baselines generated in CI, and use `visualMask`.
 - Keyboard checks are heuristics (a focus indicator drawn only by background colour may be judged by style change); expect some "suspected" noise.
 - `auth` supports form logins. OAuth redirects, MFA and SSO need a saved `storageState` instead.
+
+
+### Round 4: simulated AI (`--simulate-ai`) and prototype screens
+- **D22. A simulated provider instead of a pretend UI only.** The simulation lives in the real code path (`SimulatedProvider` behind the same `LlmProvider` interface), so everything downstream (validators, grounding guard, call log, report) is exercised for real; only the "model" is scripted. Every output is labelled simulated.
+- **D23. It must be a fair stand-in.** The first version wandered and FAILED the demo goal; a simulation that fails where the heuristic succeeds would mislead. Fixed by plural matching, matching goal words against link addresses (`/products/1`), a nudge toward unexplored pages and forms, and preferring deeper detail pages over filters. Now covered by an end-to-end test (reaches the goal in 4 steps, minimizes, replays with no AI; an impossible goal ends "not reached").
+- **Defects found building the prototype screens:** the page-wide submit handler called `preventDefault()` on dialog forms, so "Accept as known" (and the older "Not a bug") never closed on submit. It had been there since the redesign; the audit only opened dialogs and pressed Escape. Fixed; the smoke test now submits it.
+- **Honest limits:** the prototype's Ask screen is scripted (four sentence patterns plus an honest failure), not a model; the product's `--simulate-ai` is rule-based. Neither says anything about how a real model would perform. That is still untested.

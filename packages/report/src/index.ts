@@ -9,7 +9,7 @@ export interface ReportData {
   title: string; target: string; generatedAt: string; durationMs: number;
   findings: ReportFinding[]; unconfirmed: { kind: string; route: string; detail: string }[]; flows: ReportFlow[]; graph: ReportGraph;
   journeys?: ReportJourney[]; fixed?: { kind: string; route: string; detail: string }[]; firstRun?: boolean; visual?: { changed: number; created: number };
-  facts: Record<string, string | number>; llm?: { used: boolean; calls: number; costUsd: number; rejectedAssertions: number };
+  facts: Record<string, string | number>; llm?: { used: boolean; calls: number; costUsd: number; rejectedAssertions: number; simulated?: boolean };
 }
 export interface ReportOptions { assets?: 'link' | 'inline'; baseDir?: string }
 
@@ -93,7 +93,7 @@ export function buildReport(d: ReportData, o: ReportOptions = {}): string {
     `<tr><td><strong>${esc(f.name)}</strong>${f.intent && f.intent !== f.name ? `<div class="small">${esc(f.intent)}</div>` : ''}</td><td class="num">${f.steps.length}</td><td class="small">${f.assertions.map(esc).join('<br>') || '—'}</td>`
     + `<td>${f.replay ? (f.replay.ok ? '<span class="ok">Passes</span>' : `<span class="no">Fails</span><div class="small">${esc(f.replay.why ?? '')}</div>`) : '<span class="small">Not replayed</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="none">No flows were compiled.</p>';
   const facts = Object.entries(d.facts).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
-  const llm = d.llm ? `<div><dt>Language model</dt><dd>${d.llm.used ? `${plural(d.llm.calls, 'call')}, ${d.llm.rejectedAssertions} proposed ${d.llm.rejectedAssertions === 1 ? 'assertion' : 'assertions'} rejected as not true on the page, $${d.llm.costUsd.toFixed(4)}` : 'Not used; names and assertions come from what was observed'}</dd></div>` : '';
+  const llm = d.llm ? `<div><dt>Language model</dt><dd>${d.llm.simulated ? 'SIMULATED: no model was called. ' : ''}${d.llm.used ? `${plural(d.llm.calls, 'call')}, ${d.llm.rejectedAssertions} proposed ${d.llm.rejectedAssertions === 1 ? 'assertion' : 'assertions'} rejected as not true on the page, $${d.llm.costUsd.toFixed(4)}` : 'Not used; names and assertions come from what was observed'}</dd></div>` : '';
   const unconf = d.unconfirmed.length ? `<h3>Set aside</h3><p class="small">These looked wrong once but did not reproduce on replay, so they are not counted.</p><ul class="small">${d.unconfirmed.map(u => `<li>${esc(KIND_LABEL[u.kind] ?? u.kind)} at <code>${esc(u.route)}</code>: ${esc(u.detail)}</li>`).join('')}</ul>` : '';
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

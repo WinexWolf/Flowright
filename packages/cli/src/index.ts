@@ -7,7 +7,7 @@ import { crawl } from '@flowright/explorer/crawler';
 import { graphHtml } from '@flowright/explorer';
 import { analyzeApp, affectedTemplates, gitChangedFiles, shouldFail, stateDir, acceptFinding, unacceptFinding, acceptedFor, loadState, renderSuite, writeSuite, toSlack, verdict } from '@flowright/engine';
 import type { Journey } from '@flowright/flow-compiler';
-import { AnthropicProvider, type LlmProvider } from '@flowright/llm-provider';
+import { AnthropicProvider, SimulatedProvider, type LlmProvider } from '@flowright/llm-provider';
 import { HeuristicPolicy, LlmPolicy, minimizeFlow, runAgent } from '@flowright/agent';
 import { narrateFlow, polishNarration, renderDemo } from '@flowright/demo';
 import { buildReport } from '@flowright/report';
@@ -25,6 +25,7 @@ const HELP = `flowright: find broken front-end flows without clicking through th
       --out DIR  --config target.json  --steps 300  --time 300000
       --diff GITREF | --changed a.tsx,b.tsx   only verify what a change could affect
       --llm  --llm-forms   use a language model (needs ANTHROPIC_API_KEY); proposals are always verified by deterministic checks
+      --simulate-ai   see the AI features with NO key and no model: a scripted stand-in, clearly labelled, answering through the same validators
       --no-artifacts  --no-replay  --allow-nonlocal
       --fail-on error|suspect|new|none   (default error; "new" fails only on problems that were not there last run; accepted ones never fail)
       --no-a11y  --no-keyboard   skip the accessibility / keyboard checks (on by default, every page state)
@@ -37,7 +38,7 @@ const HELP = `flowright: find broken front-end flows without clicking through th
   flowright unaccept <signature>   |   flowright history   show the last runs
   flowright export --from RUNDIR --out DIR   turn the journeys of a previous run into a Playwright project
   flowright agent <url> --goal "..." --success-heading "Order confirmed"   pursue ONE goal and compile the path into a replayable flow
-      [--success-url REGEX] [--success-text TEXT] [--max-steps 15] [--llm] [--out DIR]
+      [--success-url REGEX] [--success-text TEXT] [--max-steps 15] [--llm | --simulate-ai] [--out DIR]
   flowright demo <url> (--goal ... --success-heading ... | --flows flows.json --flow ID)   record a narrated product demo (mp4 + captions)
       [--device desktop|phone] [--no-zoom] [--llm] [--out DIR]
   flowright report <outDir>   re-render report.html from a previous analyze run (no recrawl)
@@ -58,6 +59,7 @@ function needUrl(): string {
 }
 const loadCfg = (host: string): TargetConfig => flag('config') ? JSON.parse(fs.readFileSync(flag('config')!, 'utf8')) : { name: host, startPath: '/', sandbox: false };
 function provider(out: string): LlmProvider | null {
+  if (has('simulate-ai')) { fs.mkdirSync(out, { recursive: true }); console.log('AI is SIMULATED: no model is called and nothing is sent anywhere. Answers are scripted, but pass through the same checks a real model would.'); return new SimulatedProvider({ logPath: path.join(out, 'llm-calls.jsonl') }); }
   if (!has('llm')) return null;
   fs.mkdirSync(out, { recursive: true });
   const p = AnthropicProvider.fromEnv({ logPath: path.join(out, 'llm-calls.jsonl'), budget: { maxCalls: Number(flag('llm-max-calls', '200')) } });
@@ -121,7 +123,7 @@ async function main() {
   if (cmd === 'analyze') {
     const changed = flag('changed') ? flag('changed')!.split(',') : flag('diff') ? gitChangedFiles(flag('diff')!) : undefined;
     const prov = provider(out);
-    const r = await analyzeApp({ baseUrl: base, cfg, outDir: out, budget, provider: prov, llmForms: has('llm-forms'), changedFiles: changed, artifacts: !has('no-artifacts'), replayFlows: !has('no-replay'), log: m => console.log(m), title: `Flowright: ${cfg.name}`,
+    const r = await analyzeApp({ baseUrl: base, cfg, outDir: out, budget, provider: prov, llmForms: has('llm-forms') || has('simulate-ai'), changedFiles: changed, artifacts: !has('no-artifacts'), replayFlows: !has('no-replay'), log: m => console.log(m), title: `Flowright: ${cfg.name}`,
       checks: { a11y: !has('no-a11y'), keyboard: !has('no-keyboard') }, stateRoot: root, visual: has('no-visual') ? false : { update: has('update-baseline') }, exportDir: flag('export'), reportUrl: flag('report-url') });
     console.log(`\n${verdict(r.summary)}`);
     const tag = (s: string) => (s === 'new' ? 'NEW      ' : s === 'accepted' ? 'accepted ' : 'open     ');

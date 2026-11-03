@@ -142,3 +142,20 @@ All deterministic: none of these need a model or an API key. How each was verifi
 ```
 
 How this compares with other tools, and the gaps it targets: `docs/competitive-landscape.md`.
+
+## Trying the AI features without a key: `--simulate-ai`
+
+`--simulate-ai` swaps the language model for a built-in, rule-based stand-in (`SimulatedProvider`). It makes **no network call**, costs $0, and is labelled "SIMULATED" in the console, the report and the call log.
+Its answers go through exactly the same validators as a real model's, so you can watch the safety rules work:
+
+- **Flow naming:** it names flows ("Place an order") and, on purpose, proposes a couple of checks that are not true on the page ("Free shipping applied"). The grounding guard rejects them and the report counts the rejections.
+- **Goal agent:** it picks each click toward your goal with a stated reason, and reaches the shop's "place the order" goal in 4 steps. An impossible goal ends as "not reached": nothing is invented.
+- **Form values and narration:** realistic values for real fields only; captions that must keep every control name.
+
+```bash
+npx tsx packages/cli/src/index.ts agent http://127.0.0.1:3000 --simulate-ai --goal "add a product to the cart and place the order" --success-heading "Order confirmed"
+npx tsx packages/cli/src/index.ts analyze http://127.0.0.1:3000 --simulate-ai
+```
+
+It is a stand-in, not a model: it only knows the request types Flowright makes, and its choices are simple scoring rules (goal words in the link text and address, unexplored pages, forms, going deeper before sideways). It exists to show the shape of the real feature, and to test the validators.
+The clickable prototype has matching screens (Ask, "Name my flows with AI", "Add your own" break), all marked Simulated AI.
