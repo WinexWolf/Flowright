@@ -1,1 +1,9 @@
-{"name":"@flowright/driver","version":"0.1.0","type":"module","main":"src/index.ts"}
+{
+  "name": "@flowright/driver",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "axe-core": "4.14.0"
+  }
+}

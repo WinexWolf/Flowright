@@ -1,6 +1,6 @@
-import type { Browser } from 'playwright';
-import { fingerprint, type Action, type Evidence, type Flow, type Obs, type OracleFinding, type TargetConfig } from '@flowright/core';
-import { openSession, perform, snapshot } from '@flowright/driver';
+import type { Browser, Page } from 'playwright';
+import { fingerprint, type Action, type Evidence, type Flow, type Obs, type OracleFinding, type StateChecks, type TargetConfig } from '@flowright/core';
+import { openSession, perform, scanPage, snapshot } from '@flowright/driver';
 
 // NOTE: this package must never import llm-provider or agent (enforced by lint:boundaries). Replay is deterministic.
 
@@ -8,10 +8,11 @@ export interface ReplayResult {
   ok: boolean; reason?: string;
   obs: Obs; evidence?: Evidence; treeHash?: string; overlay?: string;
   noEffect: boolean;                    // did the LAST step change nothing (url, structure, network, DOM)?
+  extra?: unknown;                      // whatever the optional `after` hook returned (e.g. accessibility scan results)
 }
 
 /** Replay a path in a brand-new browser context. Observations are collected for the LAST step only. */
-export async function replayPath(browser: Browser, baseUrl: string, cfg: TargetConfig, startPath: string, steps: Action[]): Promise<ReplayResult> {
+export async function replayPath(browser: Browser, baseUrl: string, cfg: TargetConfig, startPath: string, steps: Action[], after?: (page: Page) => Promise<unknown>): Promise<ReplayResult> {
   const s = await openSession(browser, baseUrl, cfg);
   try {
     await s.page.goto(baseUrl + startPath).catch(() => {});
@@ -30,11 +31,11 @@ export async function replayPath(browser: Browser, baseUrl: string, cfg: TargetC
         const snap = await snapshot(s.page); const fp = fingerprint('', snap.tree, snap.tabs);
         const mutated = (await s.tr.lastMutation()) > before.mut;
         const noEffect = s.page.url() === before.url && s.requests === before.req && !mutated && before.h === fp.treeHash + fp.overlay;
-        return { ok: true, obs: s.obs, evidence: snap.evidence, treeHash: fp.treeHash, overlay: fp.overlay, noEffect };
+        return { ok: true, obs: s.obs, evidence: snap.evidence, treeHash: fp.treeHash, overlay: fp.overlay, noEffect, extra: after ? await after(s.page).catch(() => undefined) : undefined };
       }
     }
     const snap = await snapshot(s.page); const fp = fingerprint('', snap.tree, snap.tabs);
-    return { ok: true, obs: s.obs, evidence: snap.evidence, treeHash: fp.treeHash, overlay: fp.overlay, noEffect: false };
+    return { ok: true, obs: s.obs, evidence: snap.evidence, treeHash: fp.treeHash, overlay: fp.overlay, noEffect: false, extra: after ? await after(s.page).catch(() => undefined) : undefined };
   } finally { await s.ctx.close().catch(() => {}); }
 }
 
@@ -93,6 +94,12 @@ async function reproducesOnce(browser: Browser, baseUrl: string, cfg: TargetConf
     const a = await replayPath(browser, baseUrl, cfg, cfg.startPath, [...base, f.probe.valid]);
     const b = await replayPath(browser, baseUrl, cfg, cfg.startPath, [...base, f.probe.variant]);
     return sameProbeOutcome(a, b);
+  }
+  if (f.kind === 'a11y' || f.kind === 'keyboard') {         // re-scan the replayed state: the same rule must fail again
+    const rr = await replayPath(browser, baseUrl, cfg, cfg.startPath, f.path, p => scanPage(p, { a11y: f.kind === 'a11y', keyboard: f.kind === 'keyboard' }));
+    if (!rr.ok || !rr.extra) return false;
+    const c = rr.extra as StateChecks;
+    return f.kind === 'a11y' ? c.a11y.some(v => v.id === f.meta?.rule) : c.keyboard.some(k => k.kind === f.meta?.keyboard);
   }
   const r = await replayPath(browser, baseUrl, cfg, cfg.startPath, f.path);
   if (!r.ok) return false;

@@ -44,6 +44,18 @@ export interface TargetConfig {
   urlOverrides?: { pattern: string; template: string }[];
   viewport?: { width: number; height: number };
   storageState?: string;                  // saved auth state path
+  auth?: AuthConfig;                      // log in at the start of EVERY fresh session, so flows start authenticated and state never leaks between sessions
+  resetUrl?: string;                      // POSTed before every fresh session so apps with a shared database start from known data
+  device?: 'desktop' | 'mobile';          // mobile = 390x844, touch, 2x pixel ratio
+  visualMask?: string[];                  // CSS selectors hidden before screenshots (clocks, ads, avatars): keeps visual diffs stable
+}
+
+export interface AuthConfig {
+  loginPath: string;                      // e.g. /login
+  fields: Record<string, string>;         // input name or label -> value. Use ${ENV:NAME} to keep secrets out of the file
+  submit?: string;                        // accessible name of the submit button (default: press Enter in the last field)
+  successPath?: string;                   // the URL must contain this after logging in, otherwise the run stops with a clear error
+  successText?: string;                   // or: this text must be visible
 }
 
 export interface Finding { kind: string; route: string; detail: string }
@@ -75,9 +87,15 @@ export interface Obs {
   nativeBlocked?: boolean;         // the browser's own form validation stopped the submit (not a dead click)
   settleTimedOut?: boolean;        // the page never went quiet within the settle budget (polling/animation)
 }
+export interface A11yViolation { id: string; impact: 'minor' | 'moderate' | 'serious' | 'critical' | null; help: string; nodes: number; sample?: string }
+export interface KeyboardIssue { kind: 'no-focus-indicator' | 'keyboard-trap' | 'mouse-only'; detail: string; count: number }
+/** Per-state accessibility results. Dialogs, error states and tabs are scanned too, not just whole pages. */
+export interface StateChecks { a11y: A11yViolation[]; keyboard: KeyboardIssue[] }
+
 export interface StateNode {
   id: string; fine: string; coarse: string; treeHash: string; overlay: string;
   url: string; urlTemplate: string; evidence: Evidence; depth: number; path: Action[];
+  checks?: StateChecks; screenshot?: string;     // screenshot = file name inside the run's screens/ folder
 }
 export interface Edge { from: string; to: string; label: string; action: Action; obs: Obs }
 export interface CrawlGraph { states: StateNode[]; edges: Edge[]; cycles: string[][] }
@@ -99,11 +117,12 @@ export type Assertion =
   | { kind: 'no-alert' };
 export interface FlowIntent { name: string; intent: string; assertions: Assertion[] }
 
-export type FindingKind = 'console-error' | 'failed-request' | 'broken-link' | 'dead-click' | 'overflow' | 'broken-image' | 'empty-route' | 'missing-validation';
+export type FindingKind = 'console-error' | 'failed-request' | 'broken-link' | 'dead-click' | 'overflow' | 'broken-image' | 'empty-route' | 'missing-validation' | 'a11y' | 'keyboard' | 'visual-change';
 export interface OracleFinding {
   kind: FindingKind; route: string; detail: string;
   severity: 'error' | 'suspect';           // suspect = inferred by comparing probes (form-probe), not a direct browser signal
   signature: string;                       // stable key for dedupe / confirmation
   path: Action[];                          // steps from the start URL that reproduce it (including the triggering action)
   probe?: { valid: Action; variant: Action; from: string };   // missing-validation only
+  meta?: Record<string, unknown>;          // a11y: { rule, impact, nodes }, keyboard: { keyboard }, visual-change: { ratio, baseline, current, diff }
 }

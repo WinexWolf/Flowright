@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { LlmBudget, LlmCallRecord, LlmProvider, LlmRequest, LlmResponse } from './types.js';
 import { LlmBudgetError } from './types.js';
+import { redact } from './redact.js';
 
 /** Pull a JSON value out of model text: strips code fences and surrounding prose. Throws if none is found. */
 export function extractJson(text: string): unknown {
@@ -15,13 +16,15 @@ export function extractJson(text: string): unknown {
 export abstract class BaseProvider implements LlmProvider {
   abstract readonly name: string;
   readonly calls: LlmCallRecord[] = [];
-  constructor(protected opts: { logPath?: string; budget?: LlmBudget } = {}) {}
+  constructor(protected opts: { logPath?: string; budget?: LlmBudget; redact?: boolean } = {}) {}
   protected abstract call(req: LlmRequest, feedback?: string): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number }; costUsd: number; model: string }>;
 
   totals() { return this.calls.reduce((t, c) => ({ calls: t.calls + 1, inputTokens: t.inputTokens + c.usage.inputTokens, outputTokens: t.outputTokens + c.usage.outputTokens, costUsd: t.costUsd + c.costUsd }), { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }); }
   private record(r: LlmCallRecord) { this.calls.push(r); if (this.opts.logPath) fs.appendFileSync(this.opts.logPath, JSON.stringify(r) + '\n'); }
 
-  async generateJson<T>(req: LlmRequest, validate: (raw: unknown) => T): Promise<LlmResponse<T>> {
+  async generateJson<T>(req0: LlmRequest, validate: (raw: unknown) => T): Promise<LlmResponse<T>> {
+    // Privacy: page text can contain personal data. Everything is redacted before it can leave the machine (switch off with { redact: false } on a closed test environment).
+    const req = this.opts.redact === false ? req0 : { ...req0, prompt: redact(req0.prompt), system: req0.system === undefined ? undefined : redact(req0.system) };
     const b = this.opts.budget, t = this.totals();
     if (b?.maxCalls !== undefined && t.calls >= b.maxCalls) throw new LlmBudgetError(`LLM call budget exhausted (${b.maxCalls})`);
     if (b?.maxCostUsd !== undefined && t.costUsd >= b.maxCostUsd) throw new LlmBudgetError(`LLM cost budget exhausted ($${b.maxCostUsd})`);

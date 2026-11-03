@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, Page } from 'playwright';
 import type { Flow, TargetConfig } from '@flowright/core';
-import { locate, trackInflight, valueFor } from '@flowright/driver';
+import { authenticatedState, locate, trackInflight, valueFor } from '@flowright/driver';
 import { narrateFlow, flowTitle, type NarrationLine } from './narrate.js';
 import { captionMs, toSrt, toVtt, type Cue } from './timing.js';
 import { encodeMp4, hasFfmpeg, type AudioClip, type TtsProvider } from './media.js';
@@ -30,7 +30,8 @@ export async function renderDemo(browser: Browser, baseUrl: string, cfg: TargetC
     else clips.push({ line: lines[i], ms: captionMs(lines[i].text, wpm) });
   }
 
-  const ctx = await browser.newContext({ viewport, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, recordVideo: { dir: o.outDir, size: viewport } });
+  const storageState = await authenticatedState(browser, baseUrl, cfg);       // log in BEFORE recording, so the demo never shows the login
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, storageState, recordVideo: { dir: o.outDir, size: viewport } });
   const allowed = new Set([new URL(baseUrl).host, ...(cfg.allowedHosts ?? [])]);
   await ctx.route(u => !allowed.has(new URL(u.toString()).host), r => r.abort());
   await ctx.addInitScript(OVERLAY);

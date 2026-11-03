@@ -1,17 +1,21 @@
 import fs from 'node:fs';
 
-export interface ReportFinding { id: string; kind: string; severity: 'error' | 'suspect'; route: string; detail: string; occurrences: number; steps: string[]; reproduced: number; attempts: number; repro?: string; artifacts?: { video?: string; trace?: string; screenshot?: string } }
+export interface ReportFinding { id: string; kind: string; severity: 'error' | 'suspect'; route: string; detail: string; occurrences: number; steps: string[]; reproduced: number; attempts: number; repro?: string; artifacts?: { video?: string; trace?: string; screenshot?: string };
+  status?: 'new' | 'persisting' | 'accepted'; group?: 'bug' | 'a11y' | 'visual'; visual?: { ratio: number; baseline: string; current: string; diff?: string } }
+export interface ReportJourney { name: string; kind: string; steps: string[]; variants: { label: string; outcome: string }[]; replay?: { ok: boolean; why?: string } }
 export interface ReportFlow { id: string; name: string; intent?: string; steps: string[]; assertions: string[]; replay?: { ok: boolean; why?: string } }
 export interface ReportGraph { states: { id: string; route: string; heading: string; depth: number; findings: number }[]; edges: { from: string; to: string; bad: boolean }[] }
 export interface ReportData {
   title: string; target: string; generatedAt: string; durationMs: number;
   findings: ReportFinding[]; unconfirmed: { kind: string; route: string; detail: string }[]; flows: ReportFlow[]; graph: ReportGraph;
+  journeys?: ReportJourney[]; fixed?: { kind: string; route: string; detail: string }[]; firstRun?: boolean; visual?: { changed: number; created: number };
   facts: Record<string, string | number>; llm?: { used: boolean; calls: number; costUsd: number; rejectedAssertions: number };
 }
 export interface ReportOptions { assets?: 'link' | 'inline'; baseDir?: string }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 export const KIND_LABEL: Record<string, string> = {
+  'a11y': 'Accessibility', 'keyboard': 'Keyboard access', 'visual-change': 'Visual change',
   'console-error': 'Console error', 'failed-request': 'Failed network request', 'broken-link': 'Broken link', 'dead-click': 'Control does nothing',
   'overflow': 'Page scrolls sideways', 'broken-image': 'Broken image', 'empty-route': 'Blank page', 'missing-validation': 'Form accepts bad input', 'page-error': 'Uncaught exception',
 };
@@ -19,12 +23,15 @@ const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? o
 const dur = (ms: number) => ms < 90_000 ? `${Math.round(ms / 1000)} seconds` : `${Math.round(ms / 60_000)} minutes`;
 
 function headline(d: ReportData): { h: string; lede: string } {
-  const errs = d.findings.filter(f => f.severity === 'error').length, sus = d.findings.length - errs;
+  const live = d.findings.filter(f => f.status !== 'accepted'), fresh = live.filter(f => f.status === 'new'), first = d.firstRun !== false;
+  const errs = live.filter(f => f.severity === 'error').length, sus = live.length - errs;
   const pages = d.graph.states.length, flowsOk = d.flows.filter(f => f.replay?.ok).length, flowsRun = d.flows.filter(f => f.replay).length;
-  const h = d.findings.length === 0 ? `No problems found across ${plural(pages, 'page')}.`
-    : `${plural(d.findings.length, 'problem')} found${errs && sus ? ` (${errs} broken, ${sus} suspected)` : ''}.`;
+  const h = live.length === 0 ? `No problems found across ${plural(pages, 'page')}.`
+    : first ? `${plural(live.length, 'problem')} found${errs && sus ? ` (${errs} broken, ${sus} suspected)` : ''}.`
+    : `${plural(fresh.length, 'new problem')}, ${live.length - fresh.length} still open.`;
   const parts = [`Flowright clicked through ${plural(pages, 'page')} and ${plural(d.graph.edges.length, 'transition')} in ${dur(d.durationMs)}.`];
   if (d.findings.length) parts.push(`Every finding below reproduced when replayed from a fresh browser${d.unconfirmed.length ? `; ${plural(d.unconfirmed.length, 'candidate')} did not reproduce and ${d.unconfirmed.length === 1 ? 'was' : 'were'} set aside` : ''}.`);
+  if (d.fixed?.length) parts.push(`${plural(d.fixed.length, 'problem')} fixed since the last run.`);
   if (flowsRun) parts.push(`${flowsOk} of ${plural(flowsRun, 'flow')} replayed to the same place on a second visit.`);
   return { h, lede: parts.join(' ') };
 }
@@ -54,12 +61,18 @@ function inlineImg(p: string | undefined, o: ReportOptions): string {
   try { const full = o.baseDir ? `${o.baseDir}/${p}` : p; return `<img class="shot" alt="Screenshot after the last step" src="data:image/png;base64,${fs.readFileSync(full).toString('base64')}">`; } catch { return ''; }
 }
 
+function visualBlock(v: NonNullable<ReportFinding['visual']>, o: ReportOptions): string {
+  const img = (p: string | undefined, alt: string) => { if (!p) return ''; if (o.assets === 'inline') { try { return `<img alt="${alt}" src="data:image/png;base64,${fs.readFileSync(o.baseDir ? `${o.baseDir}/${p}` : p).toString('base64')}">`; } catch { return ''; } } return `<img alt="${alt}" src="${esc(p)}">`; };
+  return `<div class="vis"><figure>${img(v.baseline, 'Saved baseline')}<figcaption>Baseline</figcaption></figure><figure>${img(v.current, 'This run')}<figcaption>This run</figcaption></figure>${v.diff ? `<figure>${img(v.diff, 'Differences highlighted')}<figcaption>Differences</figcaption></figure>` : ''}</div>`;
+}
+
 function findingHtml(f: ReportFinding, o: ReportOptions): string {
   const a = f.artifacts ?? {}; const link = o.assets !== 'inline';
-  const evidence = o.assets === 'inline' ? inlineImg(a.screenshot, o)
-    : [a.screenshot ? `<img class="shot" alt="Screenshot after the last step" src="${esc(a.screenshot)}">` : '', a.video ? `<a href="${esc(a.video)}">Watch the video</a>` : '', a.trace ? `<a href="${esc(a.trace)}">Open the Playwright trace</a>` : ''].join(' ');
+  const vis = f.visual ? visualBlock(f.visual, o) : '';
+  const evidence = vis || (o.assets === 'inline' ? inlineImg(a.screenshot, o)
+    : [a.screenshot ? `<img class="shot" alt="Screenshot after the last step" src="${esc(a.screenshot)}">` : '', a.video ? `<a href="${esc(a.video)}">Watch the video</a>` : '', a.trace ? `<a href="${esc(a.trace)}">Open the Playwright trace</a>` : ''].join(' '));
   void link;
-  return `<details class="finding ${f.severity}"><summary><span class="sev">${f.severity === 'error' ? 'Broken' : 'Suspected'}</span><span class="what">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><code class="where">${esc(f.route)}</code><span class="why">${esc(f.detail)}</span></summary>`
+  return `<details class="finding ${f.severity}"><summary><span class="sev">${f.severity === 'error' ? 'Broken' : 'Suspected'}</span><span class="what">${esc(KIND_LABEL[f.kind] ?? f.kind)}${f.status ? ` <span class="badge ${f.status}">${f.status === 'new' ? 'New' : f.status === 'accepted' ? 'Accepted' : 'Still open'}</span>` : ''}</span><code class="where">${esc(f.route)}</code><span class="why">${esc(f.detail)}</span></summary>`
     + `<div class="body"><div><h4>How to get there</h4><ol>${f.steps.map(s => `<li>${esc(s)}</li>`).join('') || '<li>Open the start page</li>'}</ol>`
     + `<p class="small">Reproduced in ${f.reproduced} of ${plural(f.attempts, 'fresh replay')}${f.occurrences > 1 ? `; seen ${f.occurrences} times during the crawl` : ''}.</p></div>`
     + `<div>${evidence ? `<h4>Evidence</h4><div class="ev">${evidence}</div>` : ''}${f.repro ? `<h4>Runnable repro</h4><p class="small">This Playwright test fails while the bug exists and passes once it is fixed.</p><pre><code>${esc(f.repro)}</code></pre>` : ''}</div></div></details>`;
@@ -67,7 +80,15 @@ function findingHtml(f: ReportFinding, o: ReportOptions): string {
 
 export function buildReport(d: ReportData, o: ReportOptions = {}): string {
   const { h, lede } = headline(d);
-  const findings = d.findings.length ? d.findings.map(f => findingHtml(f, o)).join('') : '<p class="none">Nothing broke on any path the crawler could reach.</p>';
+  const grp = (g: string) => d.findings.filter(f => (f.group ?? 'bug') === g);
+  const list = (fs_: ReportFinding[], none: string) => fs_.length ? fs_.map(f => findingHtml(f, o)).join('') : `<p class="none">${none}</p>`;
+  const findings = list(grp('bug'), 'Nothing broke on any path the crawler could reach.');
+  const a11ySection = grp('a11y').length ? `<section><h2>Accessibility</h2><p class="small">Every page state, including dialogs and error messages, was checked against WCAG 2.x A and AA and tried with the keyboard. Automated checks find real failures but not all of them: a clean result is not a full audit.</p>${list(grp('a11y'), '')}</section>` : '';
+  const visualSection = grp('visual').length ? `<section><h2>Visual changes</h2><p class="small">These pages look different from the saved baseline and still did when re-shot in a fresh browser. If the change is intended, run again with <code>--update-baseline</code>.</p>${list(grp('visual'), '')}</section>` : '';
+  const fixedSection = d.fixed?.length ? `<section><h2>Fixed since the last run</h2><ul>${d.fixed.map(f => `<li>${esc(KIND_LABEL[f.kind] ?? f.kind)} at <code>${esc(f.route)}</code></li>`).join('')}</ul></section>` : '';
+  const jmain = (d.journeys ?? []).filter(j => j.kind !== 'page'), jpages = (d.journeys ?? []).filter(j => j.kind === 'page');
+  const jhtml = (j: ReportJourney) => `<details class="finding ${j.replay && !j.replay.ok ? 'error' : 'ok'}"><summary><span class="sev ${j.replay?.ok === false ? '' : 'okc'}">${j.replay ? (j.replay.ok ? 'Passes' : 'Fails') : 'Not replayed'}</span><span class="what">${esc(j.name)}</span><span class="why">${esc(j.kind.replace('-', ' '))}, ${plural(j.steps.length, 'step')}${j.variants.length ? `, ${j.variants.length} with unusual input` : ''}</span></summary><div class="body"><div><h4>Steps</h4><ol>${j.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>${j.replay && !j.replay.ok ? `<p class="small">${esc(j.replay.why ?? '')}</p>` : ''}</div><div>${j.variants.length ? `<h4>Also tried</h4><ul>${j.variants.map(v => `<li>${esc(v.label)}: ${v.outcome === 'validation-error' ? 'the app showed an error, as it should' : 'the app accepted it anyway (check validation)'}</li>`).join('')}</ul>` : ''}</div></div></details>`;
+  const journeySection = (jmain.length || jpages.length) ? `<section><h2>Journeys</h2>${jmain.length ? jmain.map(jhtml).join('') : '<p class="none">No multi-step journeys were found: no form led anywhere and no path was three steps deep.</p>'}${jpages.length ? `<details class="finding ok"><summary><span class="what">${plural(jpages.length, 'page flow')}</span><span class="why">one per page reached</span></summary><div class="body"><ul>${jpages.map(j => `<li>${esc(j.name)}: ${j.replay ? (j.replay.ok ? 'passes' : 'fails') : 'not replayed'}</li>`).join('')}</ul></div></details>` : ''}</section>` : '';
   const flows = d.flows.length ? `<div class="scroll"><table><thead><tr><th>Flow</th><th>Steps</th><th>Should end with</th><th>On replay</th></tr></thead><tbody>${d.flows.map(f =>
     `<tr><td><strong>${esc(f.name)}</strong>${f.intent && f.intent !== f.name ? `<div class="small">${esc(f.intent)}</div>` : ''}</td><td class="num">${f.steps.length}</td><td class="small">${f.assertions.map(esc).join('<br>') || '—'}</td>`
     + `<td>${f.replay ? (f.replay.ok ? '<span class="ok">Passes</span>' : `<span class="no">Fails</span><div class="small">${esc(f.replay.why ?? '')}</div>`) : '<span class="small">Not replayed</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="none">No flows were compiled.</p>';
@@ -96,6 +117,7 @@ code,pre{font-family:"Spline Sans Mono",ui-monospace,SFMono-Regular,Menlo,monosp
 .routemap{display:block}.routemap .edge{fill:none;stroke:var(--mut);stroke-opacity:.35;stroke-width:1.5}.routemap .edge.bad{stroke:var(--bad);stroke-opacity:.9;stroke-width:2}
 .routemap .dot{fill:var(--track)}.routemap .st.bad .dot{fill:var(--bad)}.routemap .halo{fill:var(--halo);stroke:var(--bad);stroke-width:1.5}
 .routemap text{fill:var(--ink);font:500 11px "Spline Sans Mono",ui-monospace,monospace}.routemap .hd{fill:var(--mut);font:400 11px "Hanken Grotesk",system-ui,sans-serif}
+.badge{font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;border:1.5px solid currentColor;margin-left:6px;vertical-align:1px}.badge.new{color:var(--bad)}.badge.persisting{color:var(--mut)}.badge.accepted{color:var(--pass)}.okc{color:var(--pass)}.vis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.vis figure{margin:0}.vis img{max-width:100%;border:1px solid var(--line);display:block}.vis figcaption{font-size:13px;color:var(--mut)}
 .finding{background:var(--surface);border:1px solid var(--line);border-left-width:5px;border-radius:4px;margin:0 0 10px}.finding.error{border-left-color:var(--bad)}.finding.suspect{border-left-color:var(--warn)}
 .finding summary{cursor:pointer;display:grid;grid-template-columns:auto auto 1fr;gap:4px 14px;align-items:baseline;padding:14px 16px;list-style:none}.finding summary::-webkit-details-marker{display:none}
 .finding summary:focus-visible{outline:2px solid var(--track);outline-offset:2px}
@@ -111,7 +133,8 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14
 <header><p class="target">Crawled ${esc(d.target)} on ${esc(d.generatedAt)}.</p><h1>${esc(h)}</h1><p class="lede">${esc(lede)}</p></header>
 <section><h2>Route map</h2><div class="scroll">${routeMap(d.graph)}</div><p class="small">Each dot is a page state and each line shows the click that first reached it. Red dots are where a finding was observed, and red lines are clicks that triggered an error.</p></section>
 <section><h2>What broke</h2>${findings}${unconf}</section>
-<section><h2>Flows</h2>${flows}</section>
+${a11ySection}${visualSection}${fixedSection}${journeySection}
+${d.journeys ? (flows && d.flows.length ? `<section><h2>Other flows</h2>${flows}</section>` : '') : `<section><h2>Flows</h2>${flows}</section>`}
 <section><h2>Run details</h2><dl>${facts}${llm}</dl></section>
 </main></body></html>`;
 }

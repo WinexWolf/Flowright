@@ -175,7 +175,8 @@
     title: document.title,
     headings, textSample, alerts, dialogs,
     selectedTabs: tabs.filter(t => t.selected).map(t => t.name),
-    overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+    // sideways scrolling, OR a phone laying the page out wider than its own screen (the classic missing <meta name=viewport>)
+    overflowX: document.documentElement.scrollWidth > window.innerWidth + 1 || (matchMedia('(pointer: coarse)').matches && window.innerWidth > screen.width + 1),
     brokenImages,
     emptyMain: txt(mainEl).length < 3,
   };

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Browser } from 'playwright';
 import type { Action, TargetConfig } from '@flowright/core';
-import { perform, trackInflight } from '@flowright/driver';
+import { authenticatedState, contextOptionsFor, perform, trackInflight } from '@flowright/driver';
 
 export interface ArtifactPaths { video?: string; trace?: string; screenshot?: string }
 export interface ArtifactResult { ok: boolean; error: string | null; paths: ArtifactPaths }
@@ -13,8 +13,9 @@ export interface ArtifactResult { ok: boolean; error: string | null; paths: Arti
  */
 export async function replayWithArtifacts(browser: Browser, baseUrl: string, cfg: TargetConfig, startPath: string, steps: Action[], outDir: string, opts: { video?: boolean; trace?: boolean } = {}): Promise<ArtifactResult> {
   fs.mkdirSync(outDir, { recursive: true });
-  const viewport = cfg.viewport ?? { width: 1280, height: 720 };
-  const ctx = await browser.newContext({ viewport, ...(opts.video === false ? {} : { recordVideo: { dir: outDir, size: viewport } }) });
+  const co = contextOptionsFor(cfg); const viewport = co.viewport;
+  const storageState = await authenticatedState(browser, baseUrl, cfg);     // log in BEFORE recording starts
+  const ctx = await browser.newContext({ ...co, storageState, ...(opts.video === false ? {} : { recordVideo: { dir: outDir, size: viewport } }) });
   const allowed = new Set([new URL(baseUrl).host, ...(cfg.allowedHosts ?? [])]);
   await ctx.route(u => !allowed.has(new URL(u.toString()).host), r => r.abort());
   if (opts.trace !== false) await ctx.tracing.start({ screenshots: true, snapshots: true });

@@ -2,7 +2,7 @@ import { BaseProvider } from './base.js';
 import { LlmError, type LlmBudget, type LlmRequest } from './types.js';
 
 export interface AnthropicOptions {
-  apiKey: string; model?: string; baseUrl?: string; fetchImpl?: typeof fetch; logPath?: string; budget?: LlmBudget;
+  redact?: boolean; apiKey: string; model?: string; baseUrl?: string; fetchImpl?: typeof fetch; logPath?: string; budget?: LlmBudget;
   /** USD per million tokens. Left unset, cost is reported as 0 and `pricingKnown` is false: we never invent prices. */
   pricing?: { inputPerMTok: number; outputPerMTok: number };
 }
@@ -11,7 +11,7 @@ export interface AnthropicOptions {
 export class AnthropicProvider extends BaseProvider {
   readonly name = 'anthropic';
   readonly pricingKnown: boolean;
-  constructor(private cfg: AnthropicOptions) { super({ logPath: cfg.logPath, budget: cfg.budget }); this.pricingKnown = !!cfg.pricing; }
+  constructor(private cfg: AnthropicOptions) { super({ logPath: cfg.logPath, budget: cfg.budget, redact: cfg.redact }); this.pricingKnown = !!cfg.pricing; }
 
   static fromEnv(extra: Partial<AnthropicOptions> = {}): AnthropicProvider | null {
     const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;

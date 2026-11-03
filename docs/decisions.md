@@ -172,3 +172,43 @@ Audio is a `TtsProvider` interface; only a silent stand-in exists, so there is n
 | Demo audio muxing | ffprobe confirms an audio stream with a silent stand-in voice; **not** a real voice |
 | LLM paths | scripted stand-in and faked network only; **never run against the live API** |
 | GitHub workflow | **not run** |
+
+
+---
+
+## Round 3: MVP features (journeys, accessibility, visual, history, auth, export)
+
+Driven by the competitive research in `docs/competitive-landscape.md`. No model is needed for any of it.
+
+### Design decisions
+- **D16. Accessibility findings are per state and per page *template*.** A rule is reported once per URL template (not once per product id) and keeps the path to its state, so it is confirmed by replaying and re-scanning like any other finding.
+  Impact maps critical/serious to "broken", moderate/minor to "suspected"; heuristic keyboard checks are never worse than suspected except a true keyboard trap.
+- **D17. Login is session *setup*, not a recorded step.** It runs when a fresh session opens (and in a throwaway context for recordings), so flows, replays and demos all start authenticated and never show or depend on the login.
+  A failed login throws: silent logged-out crawling would produce a false "all clear".
+- **D18. "Fixed" is only claimed between two complete crawls.** A PR-scoped or budget-limited run did not look at everything, so absence is not evidence.
+- **D19. Visual diffs are suspected, never build-breaking by default, and re-confirmed.** Changed pages are re-shot in a fresh browser; a page whose structure changed has a different fingerprint and is a new page, not a regression.
+- **D20. No auto-healing.** A flow that stops replaying is reported ("regression candidate"), because silently re-pointing it is exactly how real bugs get hidden.
+- **D21. Redaction sits in the provider.** One choke point, so nothing can bypass it; the call log stores only the redacted text.
+
+### Defects found by testing this round (all fixed)
+| Defect | How it was found |
+|---|---|
+| Keyboard-trap check bailed out as if the page had cycled: a stuck element is, by definition, one already seen | driver test on a real trap page |
+| Phones lay out a page without a viewport tag 980 px wide; nothing flagged it | mobile test (browser behaviour, not a test bug) |
+| Phone-number redaction turned a plain 16-digit order number into "[phone]" | redaction unit test |
+| Spec generator used a variable before defining it | existing spec tests |
+| `formKey` assumed on actions that do not carry it (derive it from the label) | typecheck |
+| **Test helper ran Playwright with `spawnSync` while the app under test was served from the same process**, so the browser could never connect: "fails while broken" passed for the wrong reason | the repro test could not pass once the bug was fixed |
+| The oracle's missing-validation finding on a "clean" page was **real** (the lab form accepted an invalid email); the lab app was fixed, not the finding | end-to-end debugging |
+| The lab app had no link to `/account`, so no crawler could ever reach it | login end-to-end test |
+
+### Verification (end to end, real browser, through the real pipeline)
+Accessibility + keyboard findings confirmed by replay, clean pages clean, repro test fails while broken and passes once fixed; run history over five runs (new, still open, fixed, new again, accepted);
+visual regression stable across two fresh crawls, real change caught with baseline/current/diff images, `--update` accepted; login (authenticated pages crawled, every flow replays logged in, no-auth cannot reach the private page);
+journeys detected and replayed, exported Playwright suite **executed and passed**; mobile mode catches a page that only overflows on a phone.
+
+### Known limits of these features
+- The lab apps are small and written by the tool's author. Accessibility rules, visual stability and login have been exercised on them, not on a real product.
+- Visual stability was shown for one machine and one browser build; fonts or GPU differences between a laptop and CI can cause diffs: keep baselines generated in CI, and use `visualMask`.
+- Keyboard checks are heuristics (a focus indicator drawn only by background colour may be judged by style change); expect some "suspected" noise.
+- `auth` supports form logins. OAuth redirects, MFA and SSO need a saved `storageState` instead.

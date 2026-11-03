@@ -5,7 +5,8 @@ import { chromium } from 'playwright';
 import type { Assertion, Flow, TargetConfig } from '@flowright/core';
 import { crawl } from '@flowright/explorer/crawler';
 import { graphHtml } from '@flowright/explorer';
-import { analyzeApp, affectedTemplates, gitChangedFiles } from '@flowright/engine';
+import { analyzeApp, affectedTemplates, gitChangedFiles, shouldFail, stateDir, acceptFinding, unacceptFinding, acceptedFor, loadState, renderSuite, writeSuite, toSlack, verdict } from '@flowright/engine';
+import type { Journey } from '@flowright/flow-compiler';
 import { AnthropicProvider, type LlmProvider } from '@flowright/llm-provider';
 import { HeuristicPolicy, LlmPolicy, minimizeFlow, runAgent } from '@flowright/agent';
 import { narrateFlow, polishNarration, renderDemo } from '@flowright/demo';
@@ -24,7 +25,17 @@ const HELP = `flowright: find broken front-end flows without clicking through th
       --out DIR  --config target.json  --steps 300  --time 300000
       --diff GITREF | --changed a.tsx,b.tsx   only verify what a change could affect
       --llm  --llm-forms   use a language model (needs ANTHROPIC_API_KEY); proposals are always verified by deterministic checks
-      --no-artifacts  --no-replay  --fail-on error|suspect|none (default error)  --allow-nonlocal
+      --no-artifacts  --no-replay  --allow-nonlocal
+      --fail-on error|suspect|new|none   (default error; "new" fails only on problems that were not there last run; accepted ones never fail)
+      --no-a11y  --no-keyboard   skip the accessibility / keyboard checks (on by default, every page state)
+      --no-visual  --update-baseline   visual regression against .flowright/baselines (on by default; the first run just saves baselines)
+      --device mobile   run everything as a phone (390x844, touch)
+      --state-dir DIR   project root for .flowright/ (history, accepted findings, baselines; default: current folder)
+      --export DIR   also write the discovered journeys as a plain Playwright project
+      --summary-md FILE  --slack-webhook URL  --report-url URL   PR comment / Slack output (also appends to $GITHUB_STEP_SUMMARY)
+  flowright accept <F-id|signature> --from RUNDIR --reason "..."   mark a finding as known and fine (it stops failing builds)
+  flowright unaccept <signature>   |   flowright history   show the last runs
+  flowright export --from RUNDIR --out DIR   turn the journeys of a previous run into a Playwright project
   flowright agent <url> --goal "..." --success-heading "Order confirmed"   pursue ONE goal and compile the path into a replayable flow
       [--success-url REGEX] [--success-text TEXT] [--max-steps 15] [--llm] [--out DIR]
   flowright demo <url> (--goal ... --success-heading ... | --flows flows.json --flow ID)   record a narrated product demo (mp4 + captions)
@@ -78,7 +89,24 @@ async function main() {
     fs.writeFileSync(path.join(dir, 'report.html'), buildReport(data, { assets: 'link' })); fs.writeFileSync(path.join(dir, 'report.inline.html'), buildReport(data, { assets: 'inline', baseDir: dir }));
     console.log(`Re-rendered ${dir}/report.html`); return 0;
   }
-  const base = needUrl(); const cfg = loadCfg(new URL(base).hostname);
+  const root = flag('state-dir', process.cwd())!;
+  if (cmd === 'accept') {
+    const id = pos[0], from = flag('from'); if (!id || !from || !flag('reason')) die('usage: flowright accept <F-id|signature> --from RUNDIR --reason "why this is fine"');
+    const f = acceptedFor(from, id); if (!f) die(`no finding “${id}” in ${from}/findings.json`);
+    acceptFinding(stateDir(root), f.signature, { reason: flag('reason')!, kind: f.kind, route: f.route }); console.log(`Accepted ${f.kind} at ${f.route}. It will no longer fail builds. (${stateDir(root)}/accepted.json)`); return 0;
+  }
+  if (cmd === 'unaccept') { if (!pos[0]) die('usage: flowright unaccept <signature>'); console.log(unacceptFinding(stateDir(root), pos[0]) ? 'Removed.' : 'That finding was not accepted.'); return 0; }
+  if (cmd === 'history') {
+    const st = loadState(stateDir(root)); if (!st.runs.length) { console.log('No runs recorded yet.'); return 0; }
+    for (const r of st.runs.slice(-15)) console.log(`${r.at.slice(0, 16).replace('T', ' ')}  ${r.scope.padEnd(4)}  ${String(r.findings.length).padStart(2)} findings  ${String(r.pages).padStart(3)} pages  ${r.target}`);
+    console.log(`\n${Object.keys(st.accepted).length} accepted finding(s).`); return 0;
+  }
+  if (cmd === 'export') {
+    const from = flag('from'), to = flag('out'); if (!from || !to) die('usage: flowright export --from RUNDIR --out DIR');
+    const journeys = JSON.parse(fs.readFileSync(path.join(from, 'journeys.json'), 'utf8')) as Journey[]; const tcfg = JSON.parse(fs.readFileSync(path.join(from, 'target.json'), 'utf8')) as TargetConfig;
+    const files = renderSuite({ name: tcfg.name, cfg: tcfg, journeys }); writeSuite(to, files); console.log(`Wrote ${files.length} files to ${to}. Run: cd ${to} && npm install && BASE_URL=${tcfg.name.startsWith('http') ? tcfg.name : 'http://localhost:3000'} npm test`); return 0;
+  }
+  const base = needUrl(); const cfg0 = loadCfg(new URL(base).hostname); const cfg: TargetConfig = flag('device') === 'mobile' ? { ...cfg0, device: 'mobile' } : cfg0;
   const out = flag('out', `reports/${cfg.name.replace(/[^\w.-]+/g, '_')}`)!; const budget = { maxSteps: Number(flag('steps', '300')), maxTimeMs: Number(flag('time', '300000')) };
 
   if (cmd === 'crawl') {
@@ -93,17 +121,25 @@ async function main() {
   if (cmd === 'analyze') {
     const changed = flag('changed') ? flag('changed')!.split(',') : flag('diff') ? gitChangedFiles(flag('diff')!) : undefined;
     const prov = provider(out);
-    const r = await analyzeApp({ baseUrl: base, cfg, outDir: out, budget, provider: prov, llmForms: has('llm-forms'), changedFiles: changed, artifacts: !has('no-artifacts'), replayFlows: !has('no-replay'), log: m => console.log(m), title: `Flowright: ${cfg.name}` });
-    console.log(`\n${r.findings.length === 0 ? 'No confirmed problems.' : `${r.findings.length} confirmed problem(s):`}`);
+    const r = await analyzeApp({ baseUrl: base, cfg, outDir: out, budget, provider: prov, llmForms: has('llm-forms'), changedFiles: changed, artifacts: !has('no-artifacts'), replayFlows: !has('no-replay'), log: m => console.log(m), title: `Flowright: ${cfg.name}`,
+      checks: { a11y: !has('no-a11y'), keyboard: !has('no-keyboard') }, stateRoot: root, visual: has('no-visual') ? false : { update: has('update-baseline') }, exportDir: flag('export'), reportUrl: flag('report-url') });
+    console.log(`\n${verdict(r.summary)}`);
+    const tag = (s: string) => (s === 'new' ? 'NEW      ' : s === 'accepted' ? 'accepted ' : 'open     ');
     for (const f of r.findings) {
-      console.log(`  ${f.id}  ${f.finding.severity === 'error' ? 'BROKEN   ' : 'SUSPECTED'} ${f.finding.kind.padEnd(18)} ${f.finding.route}  ${f.finding.detail}`);
-      if (process.env.GITHUB_ACTIONS) console.log(`::${f.finding.severity === 'error' ? 'error' : 'warning'} title=Flowright ${f.finding.kind}::${f.finding.route}: ${f.finding.detail.replace(/\r?\n/g, ' ')}`);
+      console.log(`  ${f.id.padEnd(4)} ${tag(f.status)} ${f.finding.severity === 'error' ? 'BROKEN   ' : 'SUSPECTED'} ${f.finding.kind.padEnd(14)} ${f.finding.route}  ${f.finding.detail}`);
+      if (process.env.GITHUB_ACTIONS && f.status !== 'accepted') console.log(`::${f.finding.severity === 'error' ? 'error' : 'warning'} title=Flowright ${f.finding.kind}::${f.finding.route}: ${f.finding.detail.replace(/\r?\n/g, ' ')}`);
     }
+    if (r.fixed.length) console.log(`  Fixed since the last run: ${r.fixed.map(f => `${f.kind} at ${f.route}`).join(', ')}`);
+    if (r.flowsStoppedReplaying.length) console.log(`  ${r.flowsStoppedReplaying.length} flow(s) that replayed last time no longer do: the UI changed or something regressed. Flowright never silently re-heals them.`);
     if (r.unconfirmed.length) console.log(`  (${r.unconfirmed.length} candidate(s) did not reproduce and were set aside)`);
-    const bad = r.flowResults.filter(f => !f.ok); console.log(`Flows: ${r.flowResults.length - bad.length}/${r.flowResults.length} replayed correctly.${prov ? ` LLM calls: ${prov.totals().calls}.` : ''}`);
+    if (r.visual.created) console.log(`  Saved ${r.visual.created} visual baseline(s) in ${stateDir(root)}/baselines (commit them).`);
+    const bad = r.flowResults.filter(f => !f.ok); console.log(`Flows: ${r.flowResults.length - bad.length}/${r.flowResults.length} replayed correctly.${prov ? ` LLM calls: ${prov.totals().calls}.` : ' No language model was used.'}`);
     console.log(`Report: ${r.reportPath}`);
-    const failOn = flag('fail-on', 'error');
-    return failOn === 'none' ? 0 : r.findings.some(f => failOn === 'suspect' || f.finding.severity === 'error') ? 1 : 0;
+    const md = fs.readFileSync(path.join(out, 'summary.md'), 'utf8');
+    if (flag('summary-md')) fs.writeFileSync(flag('summary-md')!, md);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n');
+    if (flag('slack-webhook')) { try { const res = await fetch(flag('slack-webhook')!, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(toSlack(r.summary)) }); console.log(res.ok ? 'Posted to Slack.' : `Slack returned ${res.status}`); } catch (e) { console.log(`Could not post to Slack: ${(e as Error).message}`); } }
+    return shouldFail(r, flag('fail-on', 'error') as 'error' | 'suspect' | 'new' | 'none') ? 1 : 0;
   }
 
   const browser = await chromium.launch();

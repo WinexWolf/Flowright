@@ -3,7 +3,8 @@ import {
   fingerprint, fineFrom, coarseFrom, UrlTemplater,
   type Action, type Budget, type CrawlGraph, type Edge, type ExplorationResult, type Obs, type PageSnapshot, type StateNode, type TargetConfig, type Variant,
 } from '@flowright/core';
-import { snapshot, openSession, perform as performAction, type Session, type PerformInfo } from '@flowright/driver';
+import path from 'node:path';
+import { snapshot, openSession, perform as performAction, scanPage, shoot, type Session, type PerformInfo } from '@flowright/driver';
 import { isBlocked } from './blocklist.js';
 export { valueFor } from '@flowright/driver';
 export type { Action, CrawlGraph, Edge, Obs, StateNode, Variant } from '@flowright/core';
@@ -13,6 +14,8 @@ export interface CrawlOptions {
    *  (a dropdown, a tab) are still tried from each kind of page, while the same nav link on 40 near-identical pages is not. */
   maxPerElementKey?: number;
   dryRun?: boolean;               // load the start page, list what would be done, do nothing else
+  checks?: { a11y?: boolean; keyboard?: boolean };      // accessibility + keyboard scan of every NEW state (dialogs, error states and tabs included)
+  screenshots?: { dir: string; mask?: string[] };       // a stable screenshot of every NEW state, for visual regression
   log?: (msg: string) => void;
 }
 export type CrawlResult = ExplorationResult & { graph: CrawlGraph };
@@ -104,6 +107,13 @@ async function run(browser: Browser, baseUrl: string, cfg: TargetConfig, budget:
 
   const perform = (s: Session, a: Action, info?: PerformInfo) => performAction(s.page, () => s.tr.settle(), cfg, a, info);
   const take = async (s: Session) => { const snap = await snapshot(s.page); return { snap, url: s.page.url() }; };
+  // Inspect a state the first time it is seen. Order matters: screenshot FIRST (focus rings from the keyboard scan would change it).
+  const inspect = async (s: Session, node: StateNode) => {
+    try {
+      if (opts.screenshots) node.screenshot = await shoot(s.page, path.join(opts.screenshots.dir, node.id + '.png'), opts.screenshots.mask ?? cfg.visualMask);
+      if (opts.checks && (opts.checks.a11y || opts.checks.keyboard)) node.checks = await scanPage(s.page, opts.checks);
+    } catch (e) { log(`could not inspect ${node.id}: ${(e as Error).message.split('\n')[0]}`); }
+  };
   const closeSession = async (s: Session) => { stats.settleTimeouts += s.tr.timeouts; await s.ctx.close().catch(() => {}); };
 
   // ---- root
@@ -113,7 +123,8 @@ async function run(browser: Browser, baseUrl: string, cfg: TargetConfig, budget:
       await s.page.goto(baseUrl + cfg.startPath).catch(() => {});
       await s.tr.settle();
       const { snap, url } = await take(s);
-      register(snap, url, [], 0);
+      const r = register(snap, url, [], 0);
+      await inspect(s, r.node);
     } finally { await closeSession(s); }
   }
   log(`root: ${queue.length} candidate actions`);
@@ -171,6 +182,7 @@ async function run(browser: Browser, baseUrl: string, cfg: TargetConfig, budget:
       if (s.obs.noEffect) stats.noEffectActions++;
       if (s.obs.nativeBlocked) stats.nativeBlockedSubmits++;
       edges.push({ from: task.node.id, to: dest.id, label: task.action.label, action: task.action, obs: s.obs });
+      if (isNew) await inspect(s, dest);
       if (isNew) log(`new ${dest.id} d${dest.depth} ${dest.evidence.route} [${dest.evidence.headings[0] ?? ''}] via ${task.action.label}`);
     } finally { await closeSession(s); }
   }

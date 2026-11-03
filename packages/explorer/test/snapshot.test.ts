@@ -88,3 +88,10 @@ describe('extractor: toggles, clickables, form method (M1 audit fixes)', () => {
     expect(s.forms.map(f => f.method).sort()).toEqual(['GET', 'POST']);
   });
 });
+
+describe('mobile layout: a phone laying the page out wider than its screen counts as sideways scrolling', () => {
+  const mk = async (meta: string) => { const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const p = await ctx.newPage(); await p.setContent(`<!doctype html><html lang="en"><head><title>t</title>${meta}</head><body><main><h1>Hi</h1></main></body></html>`); const s = await snapshot(p); await ctx.close(); return s.evidence.overflowX; };
+  it('a page without <meta name="viewport"> is flagged (phones render it 980 px wide)', async () => { expect(await mk('')).toBe(true); });
+  it('with the viewport meta tag it is fine', async () => { expect(await mk('<meta name="viewport" content="width=device-width, initial-scale=1">')).toBe(false); });
+  it('desktop pages are unaffected', async () => { await page.setContent('<main><h1>Hi</h1></main>'); expect((await snapshot(page)).evidence.overflowX).toBe(false); });
+});

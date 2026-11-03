@@ -38,6 +38,9 @@ mechanics work, not that Flowright generalizes. Run it on your own app before tr
 | `report <dir>` | re-render `report.html` from a previous run without recrawling |
 | `diff --base GITREF` | show which routes a change affects |
 | `crawl <url> [--dry-run]` | crawl only; `--dry-run` lists what would be clicked and clicks nothing |
+| `accept <F-id> --from RUNDIR --reason "..."` | mark a finding as known and fine; it stops failing builds (`unaccept <signature>` undoes it) |
+| `history` | the last runs: findings, pages, scope |
+| `export --from RUNDIR --out DIR` | turn the journeys of a previous run into a plain Playwright project |
 
 Add `--llm` (needs `ANTHROPIC_API_KEY`) for model-chosen actions, model-named flows, and polished narration; `--llm-forms` for model-suggested form values.
 **Nothing requires a key**: every measured result in this repo was produced without a model.
@@ -109,3 +112,33 @@ Needs `ffmpeg` for demos. Timings are from a single-CPU sandbox.
 - The redesigned landing page + app prototype is in `prototype2/index.html` (the earlier text-heavy version is `prototype/`); `npx tsx scripts/audit-prototype2.ts` re-runs its audit.
 - The first click-through UI prototype is in `prototype/index.html`; `npx tsx scripts/audit-prototype.ts` re-runs its accessibility audit (axe-core WCAG 2.2 AA on every screen in three themes, plus keyboard, focus, reflow and target-size checks).
 - `ci/flowright.yml` is an example that has not been run on GitHub Actions.
+
+
+## Features beyond the core loop (added after M6)
+
+All deterministic: none of these need a model or an API key. How each was verified is in `docs/decisions.md`.
+
+- **Journeys, not just pages.** A form whose valid submission goes somewhere is a named transaction ("Place order"), with its empty and invalid submissions as variants
+  ("the app showed an error, as it should" vs "accepted it anyway"). Pages reached in 3+ steps are named after the button pressed last ("Add to cart").
+- **Accessibility and keyboard checks on every page state** (`--no-a11y`, `--no-keyboard` to skip). axe-core WCAG 2.x A/AA rules, plus: is every Tab stop visibly focused, can focus get stuck, are
+  there clickable things a keyboard cannot reach. Dialogs and error states are scanned, not only whole pages. Findings are replay-confirmed and get a runnable repro (`@axe-core/playwright`).
+  Automated checks cover only part of WCAG: a clean result is not an audit.
+- **Visual regression** (`--no-visual` to skip, `--update-baseline` to accept changes). Stable screenshots (animations off, fonts loaded, `visualMask` selectors hidden) are compared with
+  baselines in `.flowright/baselines`. A changed page is re-shot in a fresh browser before it is reported. A page whose *structure* changed is a new page, not a visual regression.
+  The first run only saves baselines.
+- **Run history** in `.flowright/` (commit it): findings are *new*, *still open*, *fixed* or *accepted*; flows that stop replaying are flagged, never silently healed.
+  `--fail-on new` fails only for problems a change introduced. "Fixed" is only claimed between two complete runs.
+- **Login as session setup.** `auth` in the target config logs in at the start of every fresh session (so replay stays deterministic and recordings start logged in without showing the login);
+  `${ENV:NAME}` keeps secrets out of the file; a failed login stops the run loudly instead of silently crawling logged-out. `resetUrl` is POSTed before every session for apps with a shared database.
+- **Mobile mode** (`--device mobile`): 390x844 touch device. Also flags a page a phone lays out wider than its screen (the classic missing viewport tag).
+- **Export** (`--export DIR`): your journeys as an ordinary Playwright project. No lock-in.
+- **CI output:** `summary.md` (PR comment / `$GITHUB_STEP_SUMMARY`), `slack.json` and `--slack-webhook`, JUnit, GitHub annotations.
+- **Privacy:** if a model is enabled, prompts are redacted of emails, card numbers (Luhn-checked), tokens, phone numbers and IPs before they leave the machine. Pattern-based: a safety net, not a guarantee.
+
+```json
+{ "name": "myapp", "startPath": "/", "sandbox": true,
+  "auth": { "loginPath": "/login", "fields": { "email": "qa@example.com", "password": "${ENV:QA_PASSWORD}" }, "submit": "Sign in", "successPath": "/dashboard" },
+  "resetUrl": "/__reset", "device": "desktop", "visualMask": [".clock", ".avatar"] }
+```
+
+How this compares with other tools, and the gaps it targets: `docs/competitive-landscape.md`.
