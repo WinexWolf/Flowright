@@ -1,0 +1,11 @@
+import path from 'node:path'; import { chromium } from 'playwright';
+const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
+await ctx.addInitScript(() => { try { if (localStorage.getItem('fr2:theme') === null) { localStorage.setItem('fr2:theme', '"light"'); localStorage.setItem('fr2:size', '100'); localStorage.setItem('fr2:seen', 'true'); } } catch {} });
+const p = await ctx.newPage(); await p.goto('file://' + path.resolve('prototype2/index.html') + '#prefs'); await p.waitForTimeout(300);
+await p.check('input[name=theme][value=contrast]'); await p.waitForTimeout(100);
+console.log('after click:', await p.evaluate(() => document.documentElement.dataset.theme), await p.evaluate(() => localStorage.getItem('fr2:theme')));
+await p.click('details summary'); await p.check('input[name=size][value="150"]'); await p.check('#s-motion');
+console.log('before reload:', await p.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(localStorage)))));
+await p.reload(); await p.waitForTimeout(300);
+console.log('after reload:', await p.evaluate(() => document.documentElement.dataset.theme), await p.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(localStorage)))));
+await b.close();

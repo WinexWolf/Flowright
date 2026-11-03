@@ -28,7 +28,7 @@ for (const theme of ['light', 'dark', 'contrast']) {
   const p = await open(b, { theme, scheme: theme === 'dark' ? 'dark' : 'light', motion: 'reduce' });
   await go(p, '#home'); await p.click('#labrun'); await p.waitForSelector('#labopen:not([hidden])'); await axe(p, `${theme} lab finished (all problems shown)`);
   await p.click('.tg[data-bug=help]'); await axe(p, `${theme} lab toggle flipped`);
-  for (let i = 1; i < 4; i++) { await p.click('#tab' + i); await p.waitForTimeout(250); await axe(p, `${theme} tour tab ${i + 1}`); }
+  for (let i = 1; i < 6; i++) { await p.click('#tab' + i); await p.waitForTimeout(250); await axe(p, `${theme} tour tab ${i + 1}`); }
   await go(p, '#new'); await p.fill('#url', 'example.com'); await p.check('input[value=goal]'); await p.click('button[type=submit]'); await p.waitForTimeout(150); await axe(p, `${theme} form error state`);
   await go(p, '#finding-F1'); await p.click('[data-act=dismiss]'); await p.waitForSelector('dialog[open]'); await axe(p, `${theme} dismiss dialog`); await p.keyboard.press('Escape');
   await go(p, '#demos'); await p.click('[data-seg="1"]'); await axe(p, `${theme} demo timeline step`);
@@ -54,7 +54,7 @@ log('== 3. keyboard, focus and screen-reader behavior');
 { const p = await open(b); await go(p, '#home'); await p.focus('#tab0');
   await p.keyboard.press('ArrowDown'); const a = await p.evaluate(() => ({ sel: document.querySelector('#tab1')?.getAttribute('aria-selected'), foc: document.activeElement?.id }));
   a.sel === 'true' && a.foc === 'tab1' ? log('  ok   tabs: ArrowDown selects and focuses the next tab') : fail('ArrowDown on tabs: ' + JSON.stringify(a));
-  await p.keyboard.press('End'); (await p.evaluate(() => document.activeElement?.id)) === 'tab3' ? log('  ok   tabs: End jumps to the last tab') : fail('End key');
+  await p.keyboard.press('End'); (await p.evaluate(() => document.activeElement?.id)) === 'tab5' ? log('  ok   tabs: End jumps to the last tab') : fail('End key');
   await p.keyboard.press('Home'); (await p.evaluate(() => document.activeElement?.id)) === 'tab0' ? log('  ok   tabs: Home jumps to the first tab') : fail('Home key');
   (await p.evaluate(() => ({ r: document.querySelector('#stage')?.getAttribute('role'), l: document.querySelector('#stage')?.getAttribute('aria-labelledby') }))).l === 'tab0' ? log('  ok   tab panel is labelled by its tab') : fail('tabpanel label');
   await p.context().close(); }
